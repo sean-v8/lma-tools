@@ -1,0 +1,11 @@
+config.toml
+collections.csv
+.venv/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+*.log
+config.toml.before-collections

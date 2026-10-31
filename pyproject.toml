@@ -1,0 +1,41 @@
+[project]
+name = "lma-tools"
+version = "0.0.0"
+description = "Live Music Archive upload and recording report tools"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+dependencies = [
+    """internetarchive @ \
+    git+https://github.com/sean-v8/internetarchive.git\
+    @29b7644ff53826a4ee53d5ef3aa72bbc6b7cbf46""",
+    "mutagen>=1.47,<2",
+    "prompt-toolkit>=3.0.50,<4",
+    "requests>=2.32,<3",
+    "tomlkit>=0.13,<1",
+]
+
+[project.scripts]
+lmau = "lma_tools.uploader.launcher:main"
+lmav = "lma_tools.views.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["lma_tools"]
+
+[dependency-groups]
+dev = ["ruff>=0.17.3"]
+
+[tool.ruff]
+line-length = 79
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "E501", "F", "I"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
