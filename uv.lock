@@ -178,14 +178,18 @@ wheels = [
 
 [[package]]
 name = "internetarchive"
-version = "0.1.dev2360"
-source = { git = "https://github.com/sean-v8/internetarchive.git?rev=29b7644ff53826a4ee53d5ef3aa72bbc6b7cbf46#29b7644ff53826a4ee53d5ef3aa72bbc6b7cbf46" }
+version = "5.12.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
     { name = "jsonpatch" },
     { name = "requests" },
     { name = "tqdm" },
     { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a5/e5/6299a3f04c085c9d3582840e2a086a3845e89b2ae5058fb817fca0a99795/internetarchive-5.12.1.tar.gz", hash = "sha256:fa9589c463a8a64e1c194f19f40bac680e2db9b493a0d9722cf7d30754cde65b", size = 167879, upload-time = "2026-10-22T20:06:06.888Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/86/c6/58f010b88eb3fc13ce821c54f9afb916eb37274b1977ef94d92b3898e243/internetarchive-5.12.1-py3-none-any.whl", hash = "sha256:d6d5e0e776374e956cb0028661193b74c03da6b9b3312b505fbbcd1a1927acb2", size = 130491, upload-time = "2026-10-22T20:06:05.332Z" },
 ]
 
 [[package]]
@@ -219,6 +223,7 @@ dependencies = [
     { name = "prompt-toolkit" },
     { name = "requests" },
     { name = "tomlkit" },
+    { name = "tqdm" },
 ]
 
 [package.dev-dependencies]
@@ -228,11 +233,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "internetarchive", git = "https://github.com/sean-v8/internetarchive.git?rev=29b7644ff53826a4ee53d5ef3aa72bbc6b7cbf46" },
+    { name = "internetarchive", specifier = "==5.12.1" },
     { name = "mutagen", specifier = ">=1.47,<2" },
     { name = "prompt-toolkit", specifier = ">=3.0.50,<4" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "tomlkit", specifier = ">=0.13,<1" },
+    { name = "tqdm", specifier = ">=4.67,<5" },
 ]
 
 [package.metadata.requires-dev]

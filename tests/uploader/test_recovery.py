@@ -34,6 +34,7 @@ class RecoveryTests(unittest.TestCase):
         self.digest, self.size, self.stamp = cli.file_md5(self.path)
         self.journal = cli.Journal(self.root / "log", ID)
         self.session = Mock()
+        self.session.send = Mock()
         self.session.get_metadata.return_value = {"files": []}
         self.head = Mock(status_code=404, headers={})
         self.session.head.return_value = self.head

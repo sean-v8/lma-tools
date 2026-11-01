@@ -223,7 +223,7 @@ class TransferTests(unittest.TestCase):
         data = {"metadata": {"identifier": ID}, "files": []} if exists else {}
         return Item(self.parent, ID, data)
 
-    def upload(self, files, exists=True, policy=None, tracker=None):
+    def upload(self, files, exists=True, policy=None, tracker=None, workers=3):
         cli.upload_files(
             self.parent,
             self.item(exists),
@@ -233,7 +233,7 @@ class TransferTests(unittest.TestCase):
             0,
             0,
             recovery=policy or RecoveryPolicy(retries=0),
-            workers=3,
+            workers=workers,
             tracker=tracker,
         )
 
@@ -279,6 +279,38 @@ class TransferTests(unittest.TestCase):
             self.assertEqual(tracker.wire, tracker.data["total"])
         finally:
             tracker.close("done")
+
+    def test_sequential_and_single_file_use_local_bars_and_count_once(self):
+        from lma_tools.uploader.dashboard import ShowProgress
+
+        for workers, names in (
+            (1, ["one.flac", "two.flac"]),
+            (3, ["only.flac"]),
+        ):
+            with self.subTest(workers=workers):
+                files = self.files(names)
+                stream = TtyBuffer()
+                tracker = ShowProgress(ID, files, "test", self.root / "state")
+                try:
+                    with (
+                        patch.dict("os.environ", TERM="xterm"),
+                        patch.object(
+                            cli,
+                            "ProgressBoard",
+                            side_effect=lambda **kw: ProgressBoard(
+                                stream, **kw
+                            ),
+                        ),
+                    ):
+                        self.upload(files, tracker=tracker, workers=workers)
+                    tracker.publish()
+                    self.assertEqual(tracker.wire, tracker.data["total"])
+                    self.assertEqual(tracker.data["completed"], len(files))
+                    self.assertIn("B/s", stream.getvalue())
+                    self.assertIn("awaiting ack", stream.getvalue())
+                    self.assertNotIn("send", self.parent.__dict__)
+                finally:
+                    tracker.close("done")
 
     def test_creation_txt_is_confirmed_before_other_files_start(self):
         names = ["notes.txt", "tracks.ffp", "cover.jpg", "one.flac"]
@@ -451,7 +483,7 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(row.begin.call_count, 2)
         self.assertEqual(sum(c.args[0] for c in row.advance.call_args_list), 4)
 
-    def test_bars_reuse_fork_byte_speed_format(self):
+    def test_bars_use_local_byte_speed_format(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "one.flac"
             path.write_bytes(b"audio-data")

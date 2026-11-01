@@ -531,7 +531,7 @@ def upload_files(
         path,
         index,
         metadata,
-        verbose=True,
+        verbose=False,
         notify=print,
         cancel=None,
         on_state=None,
@@ -584,6 +584,9 @@ def upload_files(
                     "Inspect it; --force explicitly allows replacement."
                 )
         journal.append("upload_started", name=path.name, md5=digest, size=size)
+        own_row = progress is None
+        if own_row:
+            progress = ProgressBoard(tracker=tracker).row(path, index)
         try:
 
             def send():
@@ -598,7 +601,7 @@ def upload_files(
                     retries_sleep=retry_sleep,
                     headers={"x-archive-size-hint": str(total_size)},
                     request_kwargs={"timeout": (300, 300)},
-                    verbose=verbose,
+                    verbose=False,
                 )
 
             if (
@@ -609,28 +612,21 @@ def upload_files(
                     or journal.resume_state(path.name) is not None
                 )
             ):
-                own_row = progress is None
-                if own_row:
-                    progress = ProgressBoard(tracker=tracker).row(path, index)
-                try:
-                    outcome = MultipartUpload(
-                        session,
-                        item.identifier,
-                        path,
-                        digest,
-                        size,
-                        stamp,
-                        journal,
-                        options,
-                        policy,
-                        progress,
-                        cancel,
-                    ).run()
-                finally:
-                    if own_row:
-                        progress.close()
+                outcome = MultipartUpload(
+                    session,
+                    item.identifier,
+                    path,
+                    digest,
+                    size,
+                    stamp,
+                    journal,
+                    options,
+                    policy,
+                    progress,
+                    cancel,
+                ).run()
             else:
-                with watch_transfer(session, path, tracker):
+                with watch_transfer(session, path, tracker, progress, cancel):
                     outcome = upload_with_recovery(
                         send,
                         session,
@@ -660,6 +656,9 @@ def upload_files(
                 error=type(exc).__name__,
             )
             raise
+        finally:
+            if own_row:
+                progress.close()
         return "complete"
 
     if workers == 1 or len(selected) <= 1:

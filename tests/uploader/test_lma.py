@@ -49,6 +49,7 @@ def make_show(root, project=PROJECT, identifier=ID):
 class MetadataTests(unittest.TestCase):
     def test_exact_metadata_and_multiline_roundtrip(self):
         md = lma.parse_notes(NOTES, ID)
+        self.assertEqual(md["year"], "2026")
         self.assertEqual(md["title"], "Artist Live at Venue on 2026-08-17")
         self.assertEqual(
             md["source"],
@@ -405,6 +406,7 @@ class WorkflowTests(unittest.TestCase):
             item = Mock(exists=False, identifier=ID, files=[])
             item.upload_file.return_value = response()
             session = Mock(access_key="test", secret_key="test")
+            session.send = Mock()
             session.get_item.side_effect = [
                 item,
                 Mock(exists=True, metadata={"mediatype": "collection"}),

@@ -32,6 +32,7 @@ class MetadataFirstTests(TestCase):
             item.modify_metadata.return_value = response()
             item.upload_file.return_value = response()
             session = Mock(access_key="test", secret_key="test")
+            session.send = Mock()
             session.get_item.side_effect = [
                 item,
                 Mock(exists=True, metadata={"mediatype": "collection"}),

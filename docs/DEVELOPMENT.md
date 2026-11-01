@@ -5,9 +5,11 @@ User-facing setup and commands belong in the [README](../README.md).
 
 ## Dependencies and configuration
 
-The Archive client fork is pinned in `pyproject.toml` and `uv.lock`. Upload
-request construction and byte/rate formatting depend on that revision.
-Inspect and test those interfaces before changing the pin. Multipart resume
+The official Archive client release is pinned in `pyproject.toml` and
+`uv.lock`. Byte/rate formatting belongs to our local tqdm subclass; no private
+Archive progress class or fork is required. Both sequential and concurrent
+uploads use transport-read tracking with the client's own bars disabled.
+Inspect and test request construction before changing the pin. Multipart resume
 uses the existing HTTP dependencies, rather than a separate uploader package.
 
 Config discovery is independent of the working directory: explicit config,

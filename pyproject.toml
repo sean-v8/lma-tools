@@ -7,13 +7,12 @@ requires-python = ">=3.11"
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 dependencies = [
-    """internetarchive @ \
-    git+https://github.com/sean-v8/internetarchive.git\
-    @29b7644ff53826a4ee53d5ef3aa72bbc6b7cbf46""",
+    "internetarchive==5.12.1",
     "mutagen>=1.47,<2",
     "prompt-toolkit>=3.0.50,<4",
     "requests>=2.32,<3",
     "tomlkit>=0.13,<1",
+    "tqdm>=4.67,<5",
 ]
 
 [project.scripts]
@@ -36,6 +35,3 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "E501", "F", "I"]
-
-[tool.hatch.metadata]
-allow-direct-references = true

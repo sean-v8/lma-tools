@@ -7,7 +7,7 @@ from threading import RLock
 from urllib.parse import urlsplit
 
 from internetarchive import ArchiveSession
-from internetarchive.item import _UploadProgress
+from tqdm import tqdm
 from tqdm.utils import disp_len, disp_trim
 
 
@@ -20,7 +20,34 @@ def check_cancelled(cancel):
         raise UploadCancelled("Upload cancelled")
 
 
-class OrderedProgress(_UploadProgress):
+def upload_size(value):
+    value = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(value) < 1024 or unit == "TiB":
+            return f"{value:.2f} {unit}"
+        value /= 1024
+
+
+class UploadProgress(tqdm):
+    """Display actual byte counts and non-inverted IEC transfer rates."""
+
+    @property
+    def format_dict(self):
+        values = super().format_dict
+        rate = values["rate"]
+        if rate is None and values["elapsed"] > 0 and values["n"]:
+            rate = values["n"] / values["elapsed"]
+        values["upload_rate"] = (
+            "? B/s" if rate is None else upload_size(rate) + "/s"
+        )
+        values["uploaded"] = upload_size(values["n"])
+        values["expected"] = (
+            "?" if values["total"] is None else upload_size(values["total"])
+        )
+        return values
+
+
+class OrderedProgress(UploadProgress):
     """Keep byte/rate fields visible when a filename needs shortening."""
 
     @property
@@ -58,7 +85,7 @@ class OrderedProgress(_UploadProgress):
 
 
 def progress_values(bar):
-    values = _UploadProgress.format_dict.fget(bar)
+    values = UploadProgress.format_dict.fget(bar)
     if hasattr(bar, "_display_elapsed"):
         values["elapsed"] = bar._display_elapsed
     if getattr(bar, "_resume_offset", 0) and values["rate"] is None:
@@ -88,11 +115,11 @@ class SharedColumns:
             rate = values["rate"]
             if rate is None and values["elapsed"] > 0 and values["n"]:
                 rate = values["n"] / values["elapsed"]
-            result["elapsed"] = _UploadProgress.format_interval(
+            result["elapsed"] = UploadProgress.format_interval(
                 values["elapsed"]
             )
             result["remaining"] = (
-                _UploadProgress.format_interval(
+                UploadProgress.format_interval(
                     max(0, values["total"] - values["n"]) / rate
                 )
                 if rate
@@ -168,7 +195,7 @@ class ProgressBoard:
     def message(self, text, **kwargs):
         with self.lock:
             if self.enabled:
-                _UploadProgress.write(str(text), file=self.stream)
+                UploadProgress.write(str(text), file=self.stream)
             else:
                 print(text, file=self.stream, flush=True)
 
@@ -330,9 +357,11 @@ class TransferSession(ArchiveSession):
 
 
 @contextmanager
-def watch_transfer(session, path, tracker):
-    """Observe sequential PUTs without changing their existing display."""
-    if tracker is None or isinstance(session, TransferSession):
+def watch_transfer(session, path, tracker, row=None, cancel=None):
+    """Observe sequential PUTs with local bars and restore the session."""
+    if (tracker is None and row is None) or isinstance(
+        session, TransferSession
+    ):
         yield
         return
     original_send = session.send
@@ -345,7 +374,7 @@ def watch_transfer(session, path, tracker):
         def advance(self, size):
             tracker.advance(path.name, size)
 
-    observer = Observer()
+    observer = row if row is not None else Observer()
 
     def send(request, **kwargs):
         original = request.body
@@ -356,7 +385,7 @@ def watch_transfer(session, path, tracker):
             and not getattr(body, "_lma_multipart", False)
         ):
             observer.begin()
-            request.body = UploadBody(body, observer, None)
+            request.body = UploadBody(body, observer, cancel)
         try:
             return original_send(request, **kwargs)
         finally:
