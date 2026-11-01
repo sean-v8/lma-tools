@@ -1027,7 +1027,7 @@ def run_upload(args, directory, project, config):
                 check_response(
                     session.submit_task(
                         identifier,
-                        "derive",
+                        "derive.php",
                         comment="lma.py: selected uploads complete",
                         request_kwargs={"timeout": (30, 60)},
                     )

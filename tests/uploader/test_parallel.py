@@ -128,6 +128,7 @@ class TransferTests(unittest.TestCase):
         self.active = 0
         self.peak = 0
         self.calls = []
+        self.task_requests = []
         self.closed = []
         self.first_wave = set()
         self.barrier = None
@@ -144,6 +145,18 @@ class TransferTests(unittest.TestCase):
         self.addCleanup(capture.__exit__, None, None, None)
 
         def send(session, request, **kwargs):
+            if request.method == "POST":
+                self.assertEqual(
+                    urlsplit(request.url).path, "/services/tasks.php"
+                )
+                payload = json.loads(request.body)
+                self.assertEqual(payload["cmd"], "derive.php")
+                self.assertEqual(payload["identifier"], ID)
+                self.assertEqual(self.active, 0)
+                self.task_requests.append(payload)
+                result = response(content=b'{"success":true}')
+                result._content_consumed = True
+                return result
             if request.method == "HEAD":
                 result = response(404)
                 result._content_consumed = True
@@ -343,6 +356,7 @@ class TransferTests(unittest.TestCase):
     ):
         self.assertEqual(self.run_upload_only(), 0)
         self.parent.submit_task.assert_called_once()
+        self.assertEqual(len(self.task_requests), 1)
         self.assertEqual(self.peak, 3)
 
     def test_workers_one_override_preserves_the_sequential_session(self):
@@ -390,7 +404,10 @@ class TransferTests(unittest.TestCase):
     def derive(self):
         self.assertEqual(self.active, 0)
         self.assertEqual(len(self.calls), 3)
-        return response()
+        call = self.parent.submit_task.call_args
+        return ArchiveSession.submit_task(
+            self.parent, *call.args, **call.kwargs
+        )
 
 
 class ProgressTests(unittest.TestCase):

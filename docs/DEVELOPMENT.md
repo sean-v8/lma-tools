@@ -68,6 +68,8 @@ instead of a blind retransmission. Incomplete ordinary PUTs restart in full.
 Each FLAC PUT requests derivation; small-file PUTs suppress it. Multipart
 completion requests derivation for its assembled FLAC. A final item derive
 request follows successful processing of all selected files, including skips.
+Direct Tasks API submissions use `derive.php`; `derive` is not a supported
+command name. The per-file upload header is a separate mechanism.
 Metadata-only and runtime-only modes do not queue file derivation. Task
 acceptance does not establish that Archive has finished processing it.
 
