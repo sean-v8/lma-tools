@@ -1,8 +1,10 @@
 import base64
 import hashlib
+import io
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
@@ -26,6 +28,8 @@ def xml_response(text, status=200):
 
 class MultipartTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(redirect_stdout(io.StringIO()))
+        self.enterContext(redirect_stderr(io.StringIO()))
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)

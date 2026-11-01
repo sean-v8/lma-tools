@@ -157,6 +157,9 @@ class DiscoveryTests(unittest.TestCase):
 
 
 class ResumeTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
     def upload(self, item, paths, journal, **kwargs):
         lma.upload_files(
             Mock(),

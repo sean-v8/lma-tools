@@ -59,6 +59,8 @@ class OrderedProgress(_UploadProgress):
 
 def progress_values(bar):
     values = _UploadProgress.format_dict.fget(bar)
+    if hasattr(bar, "_display_elapsed"):
+        values["elapsed"] = bar._display_elapsed
     if getattr(bar, "_resume_offset", 0) and values["rate"] is None:
         # Stored parts are progress, but were not transmitted in this run.
         values["rate"] = 0
@@ -94,6 +96,8 @@ class SharedColumns:
                     max(0, values["total"] - values["n"]) / rate
                 )
                 if rate
+                else "00:00"
+                if values["n"] >= values["total"]
                 else "?"
             )
         return result

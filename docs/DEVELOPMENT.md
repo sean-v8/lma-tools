@@ -121,6 +121,11 @@ The completed-file counter always counts FLACs, including verified skips.
 Partial multipart bytes do not count as completed FLACs. Rates count current
 transport reads, excluding hashing and bytes restored from checkpoints.
 Interrupted runs retain confirmed files and checkpointed part bytes.
+The view smooths heartbeat rates with a 30-second exponential time constant.
+Repeated reads of one snapshot do not apply smoothing again. Timing starts
+at the current upload process, not the first historical log entry; finished
+and stale rows freeze at their final heartbeat. Remaining time covers bytes
+only, excluding unpredictable server acknowledgement and derive scheduling.
 
 The TOTAL row includes active runs and successful runs observed in that view.
 Failed, cancelled and stale attempts remain visible but are excluded from the

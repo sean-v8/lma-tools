@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -20,6 +21,7 @@ class DashboardJobs:
     def __init__(self, opened=None):
         self.opened = time.time() if opened is None else opened
         self.jobs = {}
+        self.samples = {}
 
     def update(self, jobs, now=None):
         now = time.time() if now is None else now
@@ -31,7 +33,16 @@ class DashboardJobs:
                 and job["heartbeat"] < self.opened
             ):
                 continue
-            self.jobs[key] = dict(job)
+            job = dict(job)
+            heartbeat, rate = self.samples.get(
+                key, (job["heartbeat"], job["rate"])
+            )
+            if job["heartbeat"] > heartbeat:
+                weight = -math.expm1(-(job["heartbeat"] - heartbeat) / 30)
+                rate += weight * (job["rate"] - rate)
+            self.samples[key] = job["heartbeat"], rate
+            job["rate"] = rate if job["status"] in LIVE else 0
+            self.jobs[key] = job
         for job in self.jobs.values():
             if job["status"] in LIVE and now - job["heartbeat"] > 10:
                 job.update(status="stale", rate=0)
@@ -49,6 +60,7 @@ def total_progress(jobs):
     total.update(
         started="total",
         identifier="TOTAL",
+        elapsed=elapsed_time(included),
         rate=sum(job["rate"] for job in included if job["status"] in LIVE),
         status=f"{running} running"
         if running
@@ -57,6 +69,32 @@ def total_progress(jobs):
         else "idle",
     )
     return total
+
+
+def elapsed_time(jobs, now=None):
+    """Current-run wall time, frozen when work stops or loses its heartbeat."""
+    if not jobs:
+        return 0
+    now = time.time() if now is None else now
+    end = (
+        now
+        if any(job["status"] in LIVE for job in jobs)
+        else max(job["heartbeat"] for job in jobs)
+    )
+    return max(0, end - min(job["started"] for job in jobs))
+
+
+def status_text(job):
+    """Normal transfers need no status label beside their moving bar."""
+    text = f"{job['completed']}/{job['files']} completed"
+    state = job["status"]
+    if state == "uploading":
+        return text
+    return (
+        text
+        + ", "
+        + {"checking": "check", "deriving": "derive"}.get(state, state)
+    )
 
 
 def state_directory():
@@ -212,7 +250,7 @@ def read_jobs(directory, now=None):
 
 def dashboard(directory):
     bars = {}
-    columns = SharedColumns(timing=False)
+    columns = SharedColumns()
     history = DashboardJobs()
     if not sys.stderr.isatty():
         raise ValueError("The upload dashboard needs a terminal.")
@@ -248,11 +286,13 @@ def dashboard(directory):
                 bar.total = job["total"]
                 bar.pos = -position
                 bar.n = job["sent"]
+                bar._display_elapsed = (
+                    job["elapsed"] if "elapsed" in job else elapsed_time([job])
+                )
                 bar._ema_dn = lambda value=job["rate"]: value
                 bar._ema_dt = lambda: 1
                 bar.set_postfix_str(
-                    f"{job['completed']}/{job['files']} completed, "
-                    + job["status"],
+                    status_text(job),
                     refresh=False,
                 )
             columns.prepare([bars[job["started"]] for job in jobs])

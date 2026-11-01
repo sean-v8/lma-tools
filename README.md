@@ -287,6 +287,10 @@ host reboot stops the session.
 The first interactive tmux run also starts a detached `lmau` dashboard. View it
 with `tmux attach -t lmau`. Inside tmux, use `tmux switch-client -t lmau`. Each
 show has a compact aggregate byte/rate bar and a count of completed FLACs.
+Elapsed time covers the current run. Remaining transfer time uses a smoothed
+rate over roughly 30 seconds, excluding previously uploaded bytes from speed.
+It estimates transfer time only; server acknowledgement and derivation can
+take longer. Normal transfers omit a status label; other states stay visible.
 Labels align to the longest visible identifier, and every row shares the same
 bar and metric widths. The byte total covers selected files. The file counter
 always covers all FLACs in the show folder, including verified skips;

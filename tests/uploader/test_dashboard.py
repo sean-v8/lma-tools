@@ -9,7 +9,11 @@ from unittest.mock import Mock, patch
 from requests import Request, Session
 
 from lma_tools.uploader import dashboard, launcher
-from lma_tools.uploader.progress import watch_transfer
+from lma_tools.uploader.progress import (
+    OrderedProgress,
+    SharedColumns,
+    watch_transfer,
+)
 
 
 class DashboardTests(unittest.TestCase):
@@ -41,6 +45,75 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(total["completed"], 7)
         self.assertEqual(total["rate"], 20)
         self.assertEqual(total["status"], "2 running")
+
+    def test_rate_smoothing_uses_new_heartbeats_and_includes_idle_time(self):
+        history = dashboard.DashboardJobs(opened=100)
+        job = self.job(1)
+        self.assertEqual(history.update([job], now=100)[0]["rate"], 10)
+        job.update(heartbeat=130, rate=0)
+        rate = history.update([job], now=130)[0]["rate"]
+        self.assertAlmostEqual(rate, 10 / 2.718281828, places=6)
+        self.assertEqual(history.update([job], now=131)[0]["rate"], rate)
+        job.update(heartbeat=160, rate=20)
+        self.assertGreater(history.update([job], now=160)[0]["rate"], rate)
+        job.update(heartbeat=161, status="done")
+        self.assertEqual(history.update([job], now=161)[0]["rate"], 0)
+
+    def test_elapsed_freezes_for_finished_or_stale_jobs(self):
+        job = self.job(10, heartbeat=40)
+        self.assertEqual(dashboard.elapsed_time([job], now=100), 90)
+        job["status"] = "done"
+        self.assertEqual(dashboard.elapsed_time([job], now=100), 30)
+        job["status"] = "stale"
+        self.assertEqual(dashboard.elapsed_time([job], now=200), 30)
+        self.assertEqual(dashboard.elapsed_time([], now=200), 0)
+
+    def test_compact_status_keeps_failures_visible(self):
+        job = self.job(1)
+        self.assertEqual(dashboard.status_text(job), "1/5 completed")
+        job["status"] = "deriving"
+        self.assertEqual(dashboard.status_text(job), "1/5 completed, derive")
+        job["status"] = "failed"
+        self.assertEqual(dashboard.status_text(job), "1/5 completed, failed")
+
+    def test_dashboard_timing_uses_run_start_and_rate_not_skipped_bytes(self):
+        with OrderedProgress(total=100, file=io.StringIO()) as bar:
+            bar.n = 60
+            bar._display_elapsed = 120
+            bar._ema_dn = lambda: 10
+            bar._ema_dt = lambda: 1
+            columns = SharedColumns()
+            columns.prepare([bar])
+            tail = bar.format_dict["column_tail"]
+            self.assertIn("02:00<00:04", tail)
+            bar._ema_dn = lambda: 0
+            self.assertIn("02:00<", bar.format_dict["column_tail"])
+            self.assertIn("?", bar.format_dict["column_tail"])
+            bar.n = 100
+            self.assertIn("02:00<00:00", bar.format_dict["column_tail"])
+
+    def test_dashboard_renders_total_and_show_with_elapsed_remaining(self):
+        stream = io.StringIO()
+        stream.isatty = lambda: True
+        job = self.job(time.time() - 120, heartbeat=time.time())
+
+        def wide_bar(**kwargs):
+            kwargs.update(dynamic_ncols=False, ncols=180)
+            return OrderedProgress(**kwargs)
+
+        with (
+            patch.object(dashboard, "OrderedProgress", side_effect=wide_bar),
+            patch.object(dashboard.sys, "stderr", stream),
+            patch.object(dashboard, "read_jobs", return_value=[job]),
+            patch.object(
+                dashboard.time, "sleep", side_effect=KeyboardInterrupt
+            ),
+        ):
+            dashboard.dashboard(Path("unused"))
+        output = stream.getvalue()
+        self.assertIn("TOTAL", output)
+        self.assertIn("<", output)
+        self.assertNotIn("uploading", output)
 
     def test_finishing_a_run_does_not_remove_it_from_the_total(self):
         jobs = [self.job(1), self.job(2)]
