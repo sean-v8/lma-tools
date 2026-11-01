@@ -165,10 +165,11 @@ any file transfer starts. Upload-only mode does not edit metadata or runtime.
 
 Each active file has its own progress bar, byte count and IEC speed. Active
 rows stay in file order; completed rows disappear and the remaining rows close
-the gap. Long filenames shorten to keep speeds visible. Routine start/finish
-messages are suppressed in this display. Recovery messages identify the file;
-one file's retry does not restart the others. Redirected output uses ordinary
-status lines without cursor controls.
+the gap. Shared label, bar and metric columns keep all rows aligned. Long
+filenames shorten to keep speeds visible. Routine start/finish messages are
+suppressed in this display. Recovery messages identify the file; one file's
+retry does not restart the others. Redirected output uses ordinary status lines
+without cursor controls.
 
 Set `upload_workers` under `[uploader]` in config.toml, or override per run
 with `-w` / `--workers`:
@@ -223,20 +224,27 @@ host reboot stops the session.
 
 The first interactive tmux run also starts a detached `lmau` dashboard. View it
 with `tmux attach -t lmau`. Inside tmux, use `tmux switch-client -t lmau`. Each
-show has a compact aggregate byte/rate bar and a count of confirmed files. The
-total covers files selected by that run; `-u` covers FLACs only. Verified skips
-count immediately when checked. Sent bytes include in-flight data, so 100% may
-still await acknowledgement or derivation submission. Retries reset that file's
-in-flight count; interrupted runs retain only confirmed bytes. These counters
-never authorize a skip or provide partial-file resume.
+show has a compact aggregate byte/rate bar and a count of confirmed files.
+Labels align to the longest visible identifier, and every row shares the same
+bar and metric widths. The total covers files selected by that run; `-u` covers
+FLACs only. Verified skips count immediately when checked. Sent bytes include
+in-flight data, so 100% may still await acknowledgement or derivation
+submission. Retries reset that file's in-flight count; interrupted runs retain
+only confirmed bytes. These counters never authorize a skip or provide
+partial-file resume.
 
 Progress snapshots are private local state under
 `$XDG_STATE_HOME/lma-tools/uploads`, or `~/.local/state/lma-tools/uploads`. The
-display keeps live runs and the six latest finished runs. Stale runs are
-labelled, and snapshots expire after 24 hours without updates. Closing the
-dashboard does not stop uploads; a later interactive run recreates it. Runs
-started before this version cannot report their progress. An existing session
-named `lmau` is left untouched.
+display retains every run it observes until that dashboard closes. Old finished
+runs are not restored when a new dashboard opens. A TOTAL row above the shows
+sums bytes, speed and confirmed-file counts for active runs and retained
+successful runs, so finishing a show does not reset the overall progress.
+Cancelled, failed and stale attempts remain visible but are excluded from the
+total. Stale runs are labelled. Snapshots expire after 24 hours without
+updates; completed rows already retained in the open dashboard remain visible
+even after their snapshot expires. Closing the dashboard does not stop uploads;
+a later interactive run recreates it. Runs started before this version cannot
+report their progress. An existing session named `lmau` is left untouched.
 
 Listing, help, completion, previews and noninteractive runs execute directly.
 `LMA_NO_TMUX=1` bypasses tmux. Exported variables referenced by uploader config

@@ -15,7 +15,7 @@ The Internet Archive fork remains pinned to commit
 
 Validation performed with Python 3.12:
 
-- 207 offline tests passed, including Ruff and strict text line limits.
+- 214 offline tests passed, including Ruff and strict text line limits.
 - Ruff formatting and lint checks passed.
 - Bash syntax checks passed for installation and completion scripts.
 - Isolated uv tool installation created lmau, lmav and ia executables.
@@ -91,3 +91,21 @@ snapshots, creation commands and environment forwarding. A real pseudo-
 terminal checked ordered multi-show rendering and independent dashboard
 closure. The environment disallows Unix sockets, so a real tmux server could
 not be exercised; tmux commands and session isolation were checked with mocks.
+
+Dashboard and concurrent file rows now share label, bar and metric widths.
+Column widths account for all visible rows; metric widths retain their high
+water marks to reduce movement as counters and rates change. Long labels
+shorten together when necessary. Tests cover differing names, file sizes,
+rates and statuses, removal of rows and narrow terminals. A real pseudo-
+terminal verified dashboard alignment and resizing. Upload decisions,
+transport and recovery logic are unchanged. The two redundant dashboard
+introductory lines are removed; the tmux help line remains.
+
+The dashboard includes a TOTAL row for current work and successful runs
+observed in that view. It sums selected bytes, sent bytes, confirmed bytes,
+file counts and active transfer rates. Stopped and stale attempts are
+excluded from the aggregate. Finished runs no longer disappear after six
+entries or when their snapshot expires; they remain in memory until the
+view closes. A new view excludes runs finished before it opened. Tests cover
+weighted totals, rate exclusions, completion transitions, more than six
+retained successes, view reopening and missing/stale snapshots.

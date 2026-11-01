@@ -13,6 +13,77 @@ from lma_tools.uploader.progress import watch_transfer
 
 
 class DashboardTests(unittest.TestCase):
+    def job(self, started, status="uploading", heartbeat=100):
+        return {
+            "started": started,
+            "heartbeat": heartbeat,
+            "identifier": f"artist-{started}",
+            "status": status,
+            "total": 100,
+            "sent": 40,
+            "confirmed": 20,
+            "files": 5,
+            "completed": 1,
+            "rate": 10,
+        }
+
+    def test_total_sums_active_work_and_successes_but_not_stopped_runs(self):
+        jobs = [self.job(1), self.job(2, "checking"), self.job(3, "done")]
+        jobs[2].update(sent=100, confirmed=100, completed=5, rate=999)
+        jobs += [
+            self.job(4, state) for state in ("failed", "cancelled", "stale")
+        ]
+        total = dashboard.total_progress(jobs)
+        self.assertEqual(total["total"], 300)
+        self.assertEqual(total["sent"], 180)
+        self.assertEqual(total["confirmed"], 140)
+        self.assertEqual(total["files"], 15)
+        self.assertEqual(total["completed"], 7)
+        self.assertEqual(total["rate"], 20)
+        self.assertEqual(total["status"], "2 running")
+
+    def test_finishing_a_run_does_not_remove_it_from_the_total(self):
+        jobs = [self.job(1), self.job(2)]
+        before = dashboard.total_progress(jobs)
+        jobs[0].update(status="done", sent=100, confirmed=100, completed=5)
+        after = dashboard.total_progress(jobs)
+        self.assertEqual(before["total"], after["total"])
+        self.assertGreater(after["sent"], before["sent"])
+        jobs[1].update(status="done", sent=100, confirmed=100, completed=5)
+        total = dashboard.total_progress(jobs)
+        self.assertEqual(total["sent"], total["total"])
+        self.assertEqual(total["completed"], total["files"])
+        self.assertEqual(total["status"], "done")
+        self.assertEqual(total["rate"], 0)
+        self.assertEqual(dashboard.total_progress([])["status"], "idle")
+
+    def test_all_observed_completions_survive_snapshot_expiry_until_close(
+        self,
+    ):
+        history = dashboard.DashboardJobs(opened=100)
+        jobs = [self.job(n, "done", heartbeat=101) for n in range(12)]
+        self.assertEqual(len(history.update(jobs, now=102)), 12)
+        self.assertEqual(len(history.update([], now=100000)), 12)
+        reopened = dashboard.DashboardJobs(opened=103)
+        self.assertEqual(reopened.update(jobs, now=104), [])
+
+    def test_running_job_before_open_is_kept_when_it_finishes(self):
+        history = dashboard.DashboardJobs(opened=100)
+        job = self.job(1, heartbeat=99)
+        self.assertEqual(len(history.update([job], now=100)), 1)
+        job.update(status="done", heartbeat=101)
+        jobs = history.update([job], now=102)
+        self.assertEqual(jobs[0]["status"], "done")
+        self.assertEqual(len(history.update([], now=100000)), 1)
+
+    def test_disappearing_running_snapshot_becomes_stale(self):
+        history = dashboard.DashboardJobs(opened=100)
+        history.update([self.job(1)], now=100)
+        jobs = history.update([], now=111)
+        self.assertEqual(jobs[0]["status"], "stale")
+        self.assertEqual(jobs[0]["rate"], 0)
+        self.assertEqual(dashboard.total_progress(jobs)["files"], 0)
+
     def test_retries_reset_inflight_and_only_acknowledgements_confirm(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

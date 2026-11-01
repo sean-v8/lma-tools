@@ -9,7 +9,54 @@ from pathlib import Path
 from threading import Event, RLock, Thread
 from uuid import uuid4
 
-from .progress import OrderedProgress
+from .progress import OrderedProgress, SharedColumns
+
+LIVE = {"checking", "uploading", "deriving"}
+
+
+class DashboardJobs:
+    """Retain observed runs for this view, without restoring old history."""
+
+    def __init__(self, opened=None):
+        self.opened = time.time() if opened is None else opened
+        self.jobs = {}
+
+    def update(self, jobs, now=None):
+        now = time.time() if now is None else now
+        for job in jobs:
+            key = job["started"]
+            if (
+                key not in self.jobs
+                and job["status"] not in LIVE | {"stale"}
+                and job["heartbeat"] < self.opened
+            ):
+                continue
+            self.jobs[key] = dict(job)
+        for job in self.jobs.values():
+            if job["status"] in LIVE and now - job["heartbeat"] > 10:
+                job.update(status="stale", rate=0)
+        return sorted(self.jobs.values(), key=lambda job: job["started"])
+
+
+def total_progress(jobs):
+    """Sum current work and retained successes, excluding stopped attempts."""
+    included = [job for job in jobs if job["status"] in LIVE | {"done"}]
+    total = {
+        key: sum(job[key] for job in included)
+        for key in ("total", "sent", "confirmed", "completed", "files")
+    }
+    running = sum(job["status"] in LIVE for job in included)
+    total.update(
+        started="total",
+        identifier="TOTAL",
+        rate=sum(job["rate"] for job in included if job["status"] in LIVE),
+        status=f"{running} running"
+        if running
+        else "done"
+        if included
+        else "idle",
+    )
+    return total
 
 
 def state_directory():
@@ -154,24 +201,19 @@ def read_jobs(directory, now=None):
 
 def dashboard(directory):
     bars = {}
+    columns = SharedColumns(timing=False)
+    history = DashboardJobs()
     if not sys.stderr.isatty():
         raise ValueError("The upload dashboard needs a terminal.")
     try:
         while True:
-            jobs = read_jobs(directory)
+            jobs = history.update(read_jobs(directory))
+            jobs = [total_progress(jobs), *jobs]
             for bar in bars.values():
                 bar.clear()
             present = {job["started"] for job in jobs}
             for key in list(bars):
                 if key not in present:
-                    bars.pop(key).close()
-            # Keep all live/stale jobs and the six latest finished runs.
-            live = {"checking", "uploading", "deriving", "stale"}
-            finished = [j for j in jobs if j["status"] not in live][-6:]
-            jobs = [j for j in jobs if j["status"] in live or j in finished]
-            visible = {job["started"] for job in jobs}
-            for key in list(bars):
-                if key not in visible:
                     bars.pop(key).close()
             for position, job in enumerate(jobs):
                 key = job["started"]
@@ -192,6 +234,7 @@ def dashboard(directory):
                     )
                     bars[key].delay = 0
                 bar = bars[key]
+                bar.total = job["total"]
                 bar.pos = -position
                 bar.n = job["sent"]
                 bar._ema_dn = lambda value=job["rate"]: value
@@ -201,7 +244,9 @@ def dashboard(directory):
                     + job["status"],
                     refresh=False,
                 )
-                bar.refresh()
+            columns.prepare([bars[job["started"]] for job in jobs])
+            for job in jobs:
+                bars[job["started"]].refresh()
             time.sleep(1)
     except KeyboardInterrupt:
         pass

@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from internetarchive import ArchiveSession
 from internetarchive.item import _UploadProgress
+from tqdm.utils import disp_len, disp_trim
 
 
 class UploadCancelled(Exception):
@@ -25,6 +26,8 @@ class OrderedProgress(_UploadProgress):
     @property
     def format_dict(self):
         values = super().format_dict
+        if columns := getattr(self, "columns", None):
+            return columns.format(self, values)
         columns = values.get("ncols")
         if columns:
             elapsed = values["elapsed"]
@@ -54,6 +57,88 @@ class OrderedProgress(_UploadProgress):
         return values
 
 
+class SharedColumns:
+    """One label, bar and metric grid for every currently displayed row."""
+
+    def __init__(self, timing=True):
+        self.timing = timing
+        self.widths = {}
+        self.label_width = 1
+        self.bar_width = 1
+
+    def metrics(self, values):
+        result = {
+            "uploaded": values["uploaded"],
+            "expected": values["expected"],
+            "speed": values["upload_rate"],
+            "status": values["postfix"] or "",
+        }
+        if self.timing:
+            rate = values["rate"]
+            if rate is None and values["elapsed"] > 0 and values["n"]:
+                rate = values["n"] / values["elapsed"]
+            result["elapsed"] = _UploadProgress.format_interval(
+                values["elapsed"]
+            )
+            result["remaining"] = (
+                _UploadProgress.format_interval(
+                    max(0, values["total"] - values["n"]) / rate
+                )
+                if rate
+                else "?"
+            )
+        return result
+
+    def tail(self, values):
+        metrics = self.metrics(values)
+
+        def field(key):
+            return metrics[key].rjust(self.widths[key])
+
+        text = field("uploaded") + "/" + field("expected") + " ["
+        if self.timing:
+            text += field("elapsed") + "<" + field("remaining") + ", "
+        text += field("speed")
+        if self.widths["status"]:
+            separator = ", " if metrics["status"] else "  "
+            text += separator + metrics["status"].ljust(self.widths["status"])
+        return text + "]"
+
+    def prepare(self, bars):
+        if not bars:
+            return
+        snapshots = [_UploadProgress.format_dict.fget(bar) for bar in bars]
+        for values in snapshots:
+            for key, value in self.metrics(values).items():
+                self.widths[key] = max(self.widths.get(key, 0), len(value))
+        columns = min(values.get("ncols") or 80 for values in snapshots)
+        longest = max(disp_len(bar.desc) for bar in bars)
+        budget = columns - len(self.tail(snapshots[0])) - 8
+        self.label_width = min(longest, max(1, budget - 4))
+        self.bar_width = max(1, budget - self.label_width)
+        for bar in bars:
+            bar.columns = self
+            bar.bar_format = (
+                "{desc} {percentage:3.0f}%|"
+                + "{bar:"
+                + str(self.bar_width)
+                + "}| {column_tail}"
+            )
+
+    def format(self, bar, values):
+        label = bar.desc
+        width = self.label_width
+        if disp_len(label) > width:
+            head = disp_trim(label, (width - 1) // 2)
+            tail = label
+            while tail and disp_len(tail) > width - disp_len(head) - 1:
+                tail = tail[1:]
+            label = head + "…" + tail
+        values["prefix"] = label + " " * max(0, width - disp_len(label))
+        values["column_tail"] = self.tail(values)
+        return values
+
+
 class ProgressBoard:
     def __init__(self, stream=None, tracker=None):
         self.tracker = tracker
@@ -65,6 +150,7 @@ class ProgressBoard:
         )
         self.lock = RLock()
         self.rows = []
+        self.columns = SharedColumns()
 
     def message(self, text, **kwargs):
         with self.lock:
@@ -80,6 +166,9 @@ class ProgressBoard:
 
     def _redraw(self):
         self.rows.sort(key=lambda row: row.order)
+        self.columns.prepare(
+            [row.bar for row in self.rows if row.bar is not None]
+        )
         for position, row in enumerate(self.rows):
             if row.bar is not None:
                 row.bar.pos = -position
@@ -139,7 +228,8 @@ class ProgressRow:
                 text = {"verifying remote checksum": "verifying"}.get(
                     text, text
                 )
-                self.bar.set_postfix_str(text)
+                self.bar.set_postfix_str(text, refresh=False)
+                self.board._redraw()
 
     def begin(self):
         if self.board.tracker is not None:
@@ -147,16 +237,20 @@ class ProgressRow:
         with self.board.lock:
             if self.bar is not None:
                 self.bar.reset()
-                self.bar.set_postfix_str("")
+                self.bar.set_postfix_str("", refresh=False)
+                self.board._redraw()
 
     def advance(self, size):
         if self.board.tracker is not None:
             self.board.tracker.advance(self.path.name, size)
         with self.board.lock:
             if self.bar is not None:
-                self.bar.update(size)
+                refreshed = self.bar.update(size)
                 if self.bar.n >= self.bar.total:
-                    self.bar.set_postfix_str("awaiting ack")
+                    self.bar.set_postfix_str("awaiting ack", refresh=False)
+                    refreshed = True
+                if refreshed:
+                    self.board._redraw()
 
     def finish(self, state):
         if self.board.enabled:
