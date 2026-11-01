@@ -137,6 +137,38 @@ class DashboardTests(unittest.TestCase):
                 tracker.close("cancelled")
             self.assertEqual(tracker.data["sent"], 40)
 
+    def test_file_counter_counts_all_flacs_but_never_small_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = [
+                root / name
+                for name in (
+                    "notes.txt",
+                    "cover.jpg",
+                    "checks.ffp",
+                    "one.flac",
+                    "two.FLAC",
+                )
+            ]
+            for path in files:
+                path.write_bytes(b"x" * 10)
+            tracker = dashboard.ShowProgress(
+                "artist2026-08-17", files, "show", root / "state"
+            )
+            try:
+                for path in files[:3]:
+                    tracker.complete(path.name)
+                tracker.complete(
+                    "one.flac"
+                )  # Previously uploaded and skipped.
+                tracker.publish()
+                self.assertEqual(tracker.data["files"], 2)
+                self.assertEqual(tracker.data["completed"], 1)
+                self.assertEqual(tracker.data["total"], 50)
+                self.assertEqual(tracker.data["sent"], 40)
+            finally:
+                tracker.close("done")
+
     def test_stale_jobs_are_labelled_and_old_snapshots_expire(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

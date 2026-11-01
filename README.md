@@ -286,20 +286,22 @@ host reboot stops the session.
 
 The first interactive tmux run also starts a detached `lmau` dashboard. View it
 with `tmux attach -t lmau`. Inside tmux, use `tmux switch-client -t lmau`. Each
-show has a compact aggregate byte/rate bar and a count of confirmed files.
+show has a compact aggregate byte/rate bar and a count of completed FLACs.
 Labels align to the longest visible identifier, and every row shares the same
-bar and metric widths. The total covers files selected by that run; `-u` covers
-FLACs only. Verified skips count immediately when checked. Sent bytes include
-in-flight data, so 100% may still await acknowledgement or derivation
-submission. Retries reset that file's in-flight count; interrupted runs retain
-confirmed files and checkpointed multipart bytes. These counters never
-authorize a skip; multipart checkpoints and remote verification control resume.
+bar and metric widths. The byte total covers selected files. The file counter
+always covers all FLACs in the show folder, including verified skips;
+TXT/JPG/MD5/FFP files never count toward it. Verified skips count immediately
+when checked. Sent bytes include in-flight data, so 100% may still await
+acknowledgement or derivation submission. Retries reset that file's in-flight
+count; interrupted runs retain confirmed files and checkpointed multipart
+bytes. These counters never authorize a skip; multipart checkpoints and remote
+verification control resume.
 
 Progress snapshots are private local state under
 `$XDG_STATE_HOME/lma-tools/uploads`, or `~/.local/state/lma-tools/uploads`. The
 display retains every run it observes until that dashboard closes. Old finished
 runs are not restored when a new dashboard opens. A TOTAL row above the shows
-sums bytes, speed and confirmed-file counts for active runs and retained
+sums bytes, speed and completed-FLAC counts for active runs and retained
 successful runs, so finishing a show does not reset the overall progress.
 Cancelled, failed and stale attempts remain visible but are excluded from the
 total. Stale runs are labelled. Snapshots expire after 24 hours without

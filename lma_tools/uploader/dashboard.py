@@ -72,6 +72,9 @@ class ShowProgress:
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.path = self.directory / (uuid4().hex + ".json")
         self.sizes = {p.name: p.stat().st_size for p in files}
+        self.flacs = {
+            name for name in self.sizes if name.lower().endswith(".flac")
+        }
         self.confirmed = set()
         self.active = {}
         self.partial = {}
@@ -84,7 +87,7 @@ class ShowProgress:
             "pid": os.getpid(),
             "started": time.time(),
             "total": sum(self.sizes.values()),
-            "files": len(files),
+            "files": len(self.flacs),
             "status": "checking",
         }
         self.previous = (time.monotonic(), 0)
@@ -118,7 +121,7 @@ class ShowProgress:
                 heartbeat=time.time(),
                 confirmed=confirmed,
                 sent=confirmed + sent,
-                completed=len(self.confirmed),
+                completed=len(self.confirmed & self.flacs),
                 rate=rate,
             )
             temp = self.path.with_suffix(".tmp")

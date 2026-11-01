@@ -15,7 +15,7 @@ The Internet Archive fork remains pinned to commit
 
 Validation performed with Python 3.12:
 
-- 236 offline tests passed, including Ruff and strict text line limits.
+- 237 offline tests passed, including Ruff and strict text line limits.
 - Ruff formatting and lint checks passed.
 - Bash syntax checks passed for installation and completion scripts.
 - Isolated uv tool installation created lmau, lmav and ia executables.
@@ -144,3 +144,8 @@ lines are ignored and later valid writes remain readable. Completion clears
 active state with a tombstone event. Tests cover concurrent delta writes,
 replay from a fresh Journal, stale attempt IDs, changed files and no extra
 resume files. Existing ordinary-upload and metadata workflows are retained.
+
+Dashboard file counts include only FLACs, including verified skips, in both
+normal and upload-only runs. Byte totals still cover all selected files.
+The visible label says completed. A mixed-file regression test checks that
+TXT/JPG/FFP completion never increments the FLAC count.
