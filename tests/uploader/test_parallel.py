@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -443,6 +444,28 @@ class TransferTests(unittest.TestCase):
 
 
 class ProgressTests(unittest.TestCase):
+    def test_resize_rebuilds_grid_before_tqdm_can_pad_to_old_width(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ("long-band-name-" * 6 + ".flac")
+            path.write_bytes(b"audio-data")
+            stream = TtyBuffer()
+            with patch.dict("os.environ", TERM="xterm"):
+                row = ProgressBoard(stream).row(path, 0)
+                try:
+                    row.bar.dynamic_ncols = None
+                    for width in (160, 80, 160, 80):
+                        row.bar.ncols = width
+                        stream.seek(0)
+                        stream.truncate()
+                        row.bar.refresh()
+                        text = stream.getvalue()
+                        self.assertIn("\x1b[2J\x1b[H", text)
+                        plain = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+                        for line in plain.split("\r"):
+                            self.assertLess(len(line), width)
+                finally:
+                    row.close()
+
     def test_transport_reads_count_bytes_and_cooperate_with_cancel(self):
         row = Mock()
         stop = Event()

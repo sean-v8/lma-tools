@@ -250,6 +250,10 @@ def read_jobs(directory, now=None):
 
 def dashboard(directory):
     bars = {}
+    separator = OrderedProgress(
+        total=1, position=1, leave=False, delay=1, bar_format="{desc}"
+    )
+    separator.delay = 0
     columns = SharedColumns()
     history = DashboardJobs()
     if not sys.stderr.isatty():
@@ -260,11 +264,14 @@ def dashboard(directory):
             jobs = [total_progress(jobs), *jobs]
             for bar in bars.values():
                 bar.clear()
+            separator.sp = separator.status_printer(separator.fp)
+            separator.clear()
             present = {job["started"] for job in jobs}
             for key in list(bars):
                 if key not in present:
                     bars.pop(key).close()
-            for position, job in enumerate(jobs):
+            for index, job in enumerate(jobs):
+                position = index if index == 0 else index + 1
                 key = job["started"]
                 if key not in bars:
                     bars[key] = OrderedProgress(
@@ -296,12 +303,17 @@ def dashboard(directory):
                     refresh=False,
                 )
             columns.prepare([bars[job["started"]] for job in jobs])
+            separator.set_description_str(
+                "-" * max(1, columns.terminal_width - 1), refresh=False
+            )
+            separator.refresh()
             for job in jobs:
                 bars[job["started"]].refresh()
             time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:
+        separator.close()
         for bar in bars.values():
             bar.close()
 

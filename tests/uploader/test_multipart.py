@@ -110,6 +110,7 @@ class MultipartTests(unittest.TestCase):
         )
         query = parse_qs(urlsplit(request.url).query, keep_blank_values=True)
         if request.method == "POST" and "uploads" in query:
+            self.assertEqual(urlsplit(request.url).query, "uploads")
             self.next_id += 1
             uid = f"upload-{self.next_id}"
             self.uploads[uid] = {}
@@ -392,6 +393,30 @@ class MultipartTests(unittest.TestCase):
         self.upload().run()
         self.assertEqual(self.puts, [1, 1, 2])
         self.assertEqual(self.next_id, 1)
+        events = self.upload().journal.events()
+        failure = next(
+            e for e in events if e["event"] == "resume_request_failed"
+        )
+        self.assertEqual(failure["operation"], "part 1")
+        self.assertEqual(failure["error"], "ReadTimeout")
+
+    def test_initiation_errors_are_logged_before_a_checkpoint_exists(self):
+        from requests import ConnectionError
+
+        self.policy = RecoveryPolicy(1, 1, 0.001, 0.001)
+        with patch.object(
+            self.session,
+            "request",
+            side_effect=ConnectionError("test-secret connection closed"),
+        ):
+            with self.assertRaises(ConnectionError):
+                self.upload().run()
+        events = self.upload().journal.events()
+        errors = [e for e in events if e["event"] == "resume_request_failed"]
+        self.assertEqual(len(errors), 2)
+        self.assertEqual(errors[0]["operation"], "initiate")
+        self.assertNotIn("test-secret", errors[0]["detail"])
+        self.assertIsNone(self.upload().journal.resume_state(self.path.name))
 
     def test_parallel_files_use_separate_ids_and_stream_parts(self):
         from requests.sessions import Session

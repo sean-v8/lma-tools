@@ -112,6 +112,7 @@ class DashboardTests(unittest.TestCase):
             dashboard.dashboard(Path("unused"))
         output = stream.getvalue()
         self.assertIn("TOTAL", output)
+        self.assertIn("-------", output)
         self.assertIn("<", output)
         self.assertNotIn("uploading", output)
 

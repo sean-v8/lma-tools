@@ -54,6 +54,13 @@ def xml_text(root, tag):
     return node.text if node is not None and node.text else ""
 
 
+def query_string(params):
+    query = urlencode({k: v for k, v in params.items() if k != "uploads"})
+    if "uploads" in params:
+        return "uploads" + ("&" + query if query else "")
+    return query
+
+
 class PartReader:
     """A bounded, rewindable view; no part is copied to disk or RAM."""
 
@@ -153,10 +160,19 @@ class MultipartUpload:
 
     def request(self, method, params, data=None, headers=None):
         """Retry parts under the same ID; keep credentials on trusted hosts."""
+        operation = (
+            "initiate"
+            if "uploads" in params
+            else f"part {params['partNumber']}"
+            if "partNumber" in params
+            else "list parts"
+            if method == "GET"
+            else "complete"
+        )
         for attempt in range(self.policy.retries + 1):
             check_cancelled(self.cancel)
             unchanged(self.path, self.size, self.stamp)
-            url = self.url + "?" + urlencode(params)
+            url = self.url + "?" + query_string(params)
             try:
                 for _ in range(6):
                     if isinstance(data, PartReader):
@@ -202,7 +218,7 @@ class MultipartUpload:
                             query = dict(parse_qsl(parsed.query))
                             query.update(params)
                             url = parsed._replace(
-                                query=urlencode(query), fragment=""
+                                query=query_string(query), fragment=""
                             ).geturl()
                             continue
                         root = None
@@ -240,11 +256,37 @@ class MultipartUpload:
                     and exc.code
                     in {"SlowDown", "RequestTimeout", "InternalError"}
                 )
+                status = getattr(
+                    getattr(exc, "response", None), "status_code", None
+                )
+                detail = type(exc).__name__
+                message = " ".join(str(exc).splitlines())
+                for secret in (
+                    self.session.access_key,
+                    self.session.secret_key,
+                ):
+                    if secret:
+                        message = message.replace(secret, "<redacted>")
+                if status is not None:
+                    detail += f" HTTP {status}"
+                if isinstance(exc, MultipartError):
+                    detail += f" ({exc.code})"
+                self.journal.append(
+                    "resume_request_failed",
+                    name=self.path.name,
+                    operation=operation,
+                    attempt=attempt + 1,
+                    error=type(exc).__name__,
+                    http_status=status,
+                    detail=message[:2000],
+                )
                 if not transient or attempt == self.policy.retries:
                     raise
                 self.progress.status("retrying part")
                 self.progress.message(
-                    "Multipart request interrupted; retrying this part/check."
+                    f"Multipart {operation}: {detail}; "
+                    f"retry {attempt + 1}/{self.policy.retries}. "
+                    + message[:300]
                 )
                 self.wait(attempt)
 

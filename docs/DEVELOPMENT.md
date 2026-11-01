@@ -137,6 +137,14 @@ Closing the dashboard does not stop uploads.
 
 ## Views and terminal state
 
+Progress grids recompute widths before tqdm renders or clears a row. A terminal
+resize clears the visible viewport and resets old padding lengths; scrollback
+is preserved. The dashboard reserves a separator row below TOTAL.
+
+Multipart initiation uses the bare `?uploads` subresource, including redirects.
+Request failures log the operation, attempt, exception and HTTP status before
+retrying, even if no upload ID exists yet. Credential strings are redacted.
+
 Views batches count requests and retains successful cached values until
 reload or exit. A failed replacement search preserves the last successful
 cached result. Unknown view counts remain unknown; totals include successful

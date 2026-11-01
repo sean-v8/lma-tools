@@ -50,6 +50,16 @@ class UploadProgress(tqdm):
 class OrderedProgress(UploadProgress):
     """Keep byte/rate fields visible when a filename needs shortening."""
 
+    def display(self, *args, **kwargs):
+        if columns := getattr(self, "columns", None):
+            columns.prepare(columns.bars)
+        return super().display(*args, **kwargs)
+
+    def clear(self, *args, **kwargs):
+        if columns := getattr(self, "columns", None):
+            columns.prepare(columns.bars)
+        return super().clear(*args, **kwargs)
+
     @property
     def format_dict(self):
         values = progress_values(self)
@@ -103,6 +113,8 @@ class SharedColumns:
         self.widths = {}
         self.label_width = 1
         self.bar_width = 1
+        self.bars = []
+        self.terminal_width = None
 
     def metrics(self, values):
         result = {
@@ -147,11 +159,21 @@ class SharedColumns:
     def prepare(self, bars):
         if not bars:
             return
+        self.bars = bars
         snapshots = [progress_values(bar) for bar in bars]
         for values in snapshots:
             for key, value in self.metrics(values).items():
                 self.widths[key] = max(self.widths.get(key, 0), len(value))
         columns = min(values.get("ncols") or 80 for values in snapshots)
+        if self.terminal_width not in (None, columns):
+            # Reflow invalidates tqdm's old row positions and padding lengths.
+            # Clear the visible viewport, preserving terminal scrollback.
+            if bars[0].fp.isatty():
+                bars[0].fp.write("\x1b[2J\x1b[H")
+            for bar in bars:
+                bar.sp = bar.status_printer(bar.fp)
+        self.terminal_width = columns
+        columns -= 1  # Never write the terminal's automatic-wrap column.
         longest = max(disp_len(bar.desc) for bar in bars)
         budget = columns - len(self.tail(snapshots[0])) - 8
         self.label_width = min(longest, max(1, budget - 4))
