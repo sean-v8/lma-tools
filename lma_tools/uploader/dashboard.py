@@ -258,6 +258,7 @@ def dashboard(directory):
     history = DashboardJobs()
     if not sys.stderr.isatty():
         raise ValueError("The upload dashboard needs a terminal.")
+    sys.stderr.write("\x1b[?25l")
     try:
         while True:
             jobs = history.update(read_jobs(directory))
@@ -303,10 +304,9 @@ def dashboard(directory):
                     refresh=False,
                 )
             columns.prepare([bars[job["started"]] for job in jobs])
-            separator.set_description_str(
-                "-" * max(1, columns.terminal_width - 1), refresh=False
+            separator.display(
+                msg="-" * max(1, columns.terminal_width - 1), pos=1
             )
-            separator.refresh()
             for job in jobs:
                 bars[job["started"]].refresh()
             time.sleep(1)
@@ -316,6 +316,8 @@ def dashboard(directory):
         separator.close()
         for bar in bars.values():
             bar.close()
+        sys.stderr.write("\x1b[?25h")
+        sys.stderr.flush()
 
 
 def main():

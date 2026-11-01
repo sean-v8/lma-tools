@@ -459,7 +459,9 @@ class ProgressTests(unittest.TestCase):
                         stream.truncate()
                         row.bar.refresh()
                         text = stream.getvalue()
-                        self.assertIn("\x1b[2J\x1b[H", text)
+                        self.assertIn("\x1b[J", text)
+                        self.assertNotIn("\x1b[2J", text)
+                        self.assertNotIn("\x1b[H", text)
                         plain = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
                         for line in plain.split("\r"):
                             self.assertLess(len(line), width)

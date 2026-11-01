@@ -27,6 +27,26 @@ def xml_response(text, status=200):
 
 
 class MultipartTests(unittest.TestCase):
+    def test_end_of_part_reports_waiting_for_ack_once_per_attempt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "part.flac"
+            path.write_bytes(b"abcde")
+            progress, sent = Mock(), Mock()
+            body = multipart.PartReader(path, 0, 5, progress, None)
+            body.on_sent = sent
+            try:
+                body.read(3)
+                progress.status.assert_not_called()
+                body.read(2)
+                progress.status.assert_called_once_with("awaiting ack")
+                body.read(2)
+                sent.assert_called_once_with()
+                body.restart()
+                body.read()
+                self.assertEqual(sent.call_count, 2)
+            finally:
+                body.close()
+
     def setUp(self):
         self.enterContext(redirect_stdout(io.StringIO()))
         self.enterContext(redirect_stderr(io.StringIO()))

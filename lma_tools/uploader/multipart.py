@@ -70,6 +70,9 @@ class PartReader:
         self.handle = path.open("rb")
         self.offset, self.size = offset, size
         self.progress, self.cancel = progress, cancel
+        self.on_sent = None
+        self.ack_status = "awaiting ack"
+        self.sent = False
         self.seek(0)
 
     def __len__(self):
@@ -93,6 +96,7 @@ class PartReader:
 
     def restart(self):
         self.seek(0)
+        self.sent = False
         self.progress.resume(self.offset)
 
     def read(self, size=-1):
@@ -103,6 +107,11 @@ class PartReader:
         if not data and remaining:
             raise ValueError("File truncated during multipart transfer")
         self.progress.advance(len(data))
+        if not self.sent and self.tell() == self.size:
+            self.sent = True
+            self.progress.status(self.ack_status)
+            if self.on_sent is not None:
+                self.on_sent()
         return data
 
     def close(self):
@@ -443,6 +452,13 @@ class MultipartUpload:
                     self.progress.status(f"part {number}/{count}")
                     body = PartReader(
                         self.path, offset, size, self.progress, self.cancel
+                    )
+                    body.ack_status = f"awaiting ack {number}/{count}"
+                    body.on_sent = lambda: self.journal.append(
+                        "resume_part_sent",
+                        name=self.path.name,
+                        number=number,
+                        size=size,
                     )
                     try:
                         _, headers = self.request(

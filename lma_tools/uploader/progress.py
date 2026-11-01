@@ -53,7 +53,9 @@ class OrderedProgress(UploadProgress):
     def display(self, *args, **kwargs):
         if columns := getattr(self, "columns", None):
             columns.prepare(columns.bars)
-        return super().display(*args, **kwargs)
+        result = super().display(*args, **kwargs)
+        self._rendered_width = disp_len(str(self))
+        return result
 
     def clear(self, *args, **kwargs):
         if columns := getattr(self, "columns", None):
@@ -166,10 +168,12 @@ class SharedColumns:
                 self.widths[key] = max(self.widths.get(key, 0), len(value))
         columns = min(values.get("ncols") or 80 for values in snapshots)
         if self.terminal_width not in (None, columns):
-            # Reflow invalidates tqdm's old row positions and padding lengths.
-            # Clear the visible viewport, preserving terminal scrollback.
+            # Erase only the progress region, including its reflowed rows.
             if bars[0].fp.isatty():
-                bars[0].fp.write("\x1b[2J\x1b[H")
+                width = getattr(bars[0], "_rendered_width", 0)
+                wrapped = max(0, width - 1) // max(1, columns)
+                up = f"\x1b[{wrapped}A" if wrapped else ""
+                bars[0].fp.write("\r" + up + "\x1b[J")
             for bar in bars:
                 bar.sp = bar.status_printer(bar.fp)
         self.terminal_width = columns

@@ -138,8 +138,13 @@ Closing the dashboard does not stop uploads.
 ## Views and terminal state
 
 Progress grids recompute widths before tqdm renders or clears a row. A terminal
-resize clears the visible viewport and resets old padding lengths; scrollback
-is preserved. The dashboard reserves a separator row below TOTAL.
+resize erases the progress region and resets old padding lengths, preserving
+the preceding terminal output. The dashboard reserves a full-width dashed
+separator below TOTAL and hides its cursor until the view closes.
+
+After a multipart body is consumed, the row shows `awaiting ack` until the
+server responds. A `resume_part_sent` log event distinguishes that wait from
+sending bytes; only acknowledgements or reconciled server parts are reusable.
 
 Multipart initiation uses the bare `?uploads` subresource, including redirects.
 Request failures log the operation, attempt, exception and HTTP status before
