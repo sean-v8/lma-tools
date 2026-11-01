@@ -77,6 +77,7 @@ def parse_notes(text, identifier):
         creator=creator,
         title=f"{creator} Live at {venue} on {show_date}",
         date=show_date,
+        year=show_date[:4],
         description=text,
         taper=person[1].strip(),
         transferer=person[1].strip(),
