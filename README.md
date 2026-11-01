@@ -140,6 +140,36 @@ exact FLAC sample counts and rounded once. Full, metadata and runtime modes
 require the complete local FLAC inventory. FFP inventories and embedded
 fingerprints are checked; MD5 manifests are uploaded as supplied.
 
+### Concurrent uploads
+
+The uploader runs up to three file transfers at a time by default. After a
+new item's first notes TXT is confirmed, remaining small files and FLACs
+share the same bounded pool. Existing-item metadata updates finish before
+any file transfer starts. Upload-only mode does not edit metadata or runtime.
+
+Each active file has its own progress bar, byte count and IEC speed. Bar rows
+are reused as files finish. Recovery messages identify the affected file;
+one file's retry does not restart the others. Redirected output uses ordinary
+status lines without cursor controls.
+
+Set `upload_workers` under `[uploader]` in config.toml, or override per run:
+
+```bash
+lmau --workers 3 band2026-08-17.audience
+lmau -u --workers 1 band2026-08-17.audience
+```
+
+`--workers 1` retains sequential uploads and the original single-file display.
+Increasing the limit helps only while the connection and Archive can support
+more transfers. A few workers are easier to monitor than every track at once.
+
+A failed file stops new files from starting. Already-active transfers finish
+and record their outcomes; derivation is queued only when all selected files
+succeed. Ctrl-C stops scheduling, interrupts recovery waits and cancels body
+reads. Requests awaiting a server reply or a library backoff may need to
+return or reach their timeout before the run exits. Resume with the same
+command to check and skip completed files.
+
 ### Resume and recovery
 
 Matching remote whole-file MD5 and size skip completed files. A conflicting

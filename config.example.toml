@@ -1,6 +1,7 @@
 [uploader]
 shows_root = "/path/to/shows"
 log = true
+upload_workers = 3
 
 [uploader.recovery]
 retries = 3

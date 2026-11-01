@@ -289,7 +289,7 @@ class WorkflowTests(unittest.TestCase):
         folder = make_show(root)
         config = root / "config.toml"
         config.write_text(
-            f'[uploader]\nshows_root = "{root}"\n'
+            f'[uploader]\nshows_root = "{root}"\nupload_workers = 1\n'
             '[uploader.collections]\nartist = "ExampleArtistCollection"\n'
         )
         return folder, ["--config", str(config), ID]

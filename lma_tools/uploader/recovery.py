@@ -11,6 +11,7 @@ import requests
 from urllib3.exceptions import MaxRetryError, ProtocolError, TimeoutError
 
 from .core import check_response
+from .progress import UploadCancelled, check_cancelled
 
 TRANSIENT_HTTP = {408, 429, 500, 502, 503, 504}
 
@@ -186,9 +187,14 @@ def upload_with_recovery(
     journal,
     policy,
     force=False,
+    notify=None,
+    cancel=None,
+    on_state=None,
 ):
+    emit = notify if notify is not None else print
     pending = None
     for cycle in range(policy.retries + 1):
+        check_cancelled(cancel)
         unchanged(path, size, stamp)
         if pending is None:
             try:
@@ -209,7 +215,7 @@ def upload_with_recovery(
                 if not retryable(exc) or policy.retries == 0:
                     raise
                 pending = exc
-                print(
+                emit(
                     "  Upload acknowledgement uncertain "
                     f"({type(exc).__name__}); "
                     "checking remote checksums before resending.",
@@ -222,18 +228,24 @@ def upload_with_recovery(
                     size=size,
                     error=type(exc).__name__,
                 )
+        if on_state is not None:
+            on_state("verifying remote checksum")
         last_state = "unknown"
         for check in range(policy.checks):
             delay = min(
                 policy.max_delay,
                 policy.delay * 2 ** min(cycle * policy.checks + check, 20),
             )
-            print(
+            emit(
                 f"  Waiting {delay:g}s before remote verification "
                 f"{check + 1}/{policy.checks}.",
                 flush=True,
             )
-            time.sleep(delay)
+            if cancel is None:
+                time.sleep(delay)
+            elif cancel.wait(delay):
+                raise UploadCancelled("Upload cancelled during recovery wait")
+            check_cancelled(cancel)
             unchanged(path, size, stamp)
             last_state, source = remote_state(
                 session, identifier, path.name, digest, size, force
@@ -249,14 +261,14 @@ def upload_with_recovery(
             )
             if last_state == "match":
                 unchanged(path, size, stamp)
-                print(
+                emit(
                     "  Confirmed: remote MD5 and size match; continuing.",
                     flush=True,
                 )
                 return {"verified_by": source}
         if cycle < policy.retries:
             if last_state == "missing":
-                print(
+                emit(
                     f"  Retrying {path.name} from the beginning "
                     f"({cycle + 1}/{policy.retries}).",
                     flush=True,
@@ -269,11 +281,13 @@ def upload_with_recovery(
                     attempt=cycle + 2,
                 )
                 pending = None
+                if on_state is not None:
+                    on_state("retrying")
             else:
-                print(
+                emit(
                     "  Remote state is still unknown; continuing checks "
                     "without resending.",
                     flush=True,
                 )
-    print("  Automatic recovery exhausted; stopping this run.", flush=True)
+    emit("  Automatic recovery exhausted; stopping this run.", flush=True)
     raise pending

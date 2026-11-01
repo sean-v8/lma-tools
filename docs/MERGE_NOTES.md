@@ -15,7 +15,7 @@ The Internet Archive fork remains pinned to commit
 
 Validation performed with Python 3.12:
 
-- 162 offline tests passed, including Ruff and strict text line limits.
+- 180 offline tests passed, including Ruff and strict text line limits.
 - Ruff formatting and lint checks passed.
 - Bash syntax checks passed for installation and completion scripts.
 - Isolated uv tool installation created lmau, lmav and ia executables.
@@ -48,3 +48,14 @@ Preflight HEAD checks recognize completed uploads without a success log.
 The implementation was checked against the pinned internetarchive source,
 including its wrapped urllib3 read timeout and connection reset behavior.
 No live uploads, metadata writes or derive requests were performed.
+
+Concurrent uploads use a bounded pool with independent Archive sessions,
+serialized journal writes and coordinated progress rows using the pinned
+fork's byte/rate formatter. New-item creation waits for the first TXT before
+starting other transfers. Existing metadata edits remain before transfers.
+Tests run real Archive request construction against an in-memory transport;
+they check simultaneous small/FLAC transfers, Content-Length, creation
+ordering, independent timeout recovery, session cleanup, fatal failure
+handling and derivation only after all files succeed. Additional checks cover
+cancellation, interruptible retry waits, progress byte counts excluding local
+hash reads, and concurrent journal integrity. No live uploads were performed.

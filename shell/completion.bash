@@ -7,7 +7,8 @@ _lma_complete() {
             compopt -o filenames
             mapfile -t COMPREPLY < <(compgen -f -- "$current")
             return ;;
-        --collection|--identifier|--retries|--retry-sleep) return ;;
+        --collection|--identifier|--retries|--retry-sleep|--workers)
+            return ;;
     esac
     local -a config_args=()
     local i

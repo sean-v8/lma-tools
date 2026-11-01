@@ -14,10 +14,13 @@ import re
 import sys
 import tomllib
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 
 from internetarchive import ArchiveSession
+from internetarchive.item import Item
 from requests import HTTPError, RequestException
 
 from lma_tools.config import config_path, read_section
@@ -32,6 +35,8 @@ from .core import (
     show_identity,
     validate_fingerprints,
 )
+from .parallel import run_parallel, upload_workers
+from .progress import TransferSession, check_cancelled
 from .recovery import (
     RecoveryPolicy,
     head_state,
@@ -47,7 +52,13 @@ def load_config(path):
             "and set shows_root for this machine."
         )
     config = read_section(path, "uploader")
-    unknown = set(config) - {"shows_root", "log", "collections", "recovery"}
+    unknown = set(config) - {
+        "shows_root",
+        "log",
+        "collections",
+        "recovery",
+        "upload_workers",
+    }
     if unknown:
         raise ValueError(f"Unknown uploader config keys: {sorted(unknown)}")
     root = config.get("shows_root")
@@ -63,6 +74,7 @@ def load_config(path):
         raise ValueError("config log must be true or false.")
     validate(config.get("collections", {}))
     load_policy(config.get("recovery", {}))
+    upload_workers(config.get("upload_workers", 3))
     return config
 
 
@@ -225,8 +237,13 @@ class Journal:
 
     def __init__(self, path, identifier, enabled=True):
         self.path, self.identifier, self.enabled = path, identifier, enabled
+        self._lock = RLock()
 
     def events(self):
+        with self._lock:
+            return self._events()
+
+    def _events(self):
         if not self.enabled or not self.path.exists():
             return []
         events = []
@@ -246,6 +263,10 @@ class Journal:
         return events
 
     def append(self, event, **data):
+        with self._lock:
+            self._append(event, **data)
+
+    def _append(self, event, **data):
         if not self.enabled:
             return
         record = dict(
@@ -370,12 +391,27 @@ def upload_files(
     trust_log=False,
     force=False,
     recovery=None,
+    workers=1,
 ):
     policy = recovery if recovery is not None else RecoveryPolicy()
+    workers = upload_workers(workers)
+    selected = list(files)
     remote = remote_inventory(item) if item.exists else {}
-    total_size = sum(p.stat().st_size for p in files)
-    for index, path in enumerate(files, 1):
-        print(f"[{index}/{len(files)}] Checking {path.name}", flush=True)
+    total_size = sum(p.stat().st_size for p in selected)
+
+    def transfer(
+        session,
+        item,
+        path,
+        index,
+        metadata,
+        verbose=True,
+        notify=print,
+        cancel=None,
+        on_state=None,
+    ):
+        check_cancelled(cancel)
+        notify(f"[{index}/{len(selected)}] Checking {path.name}", flush=True)
         digest, size, stamp = file_md5(path)
         entry = remote.get(path.name)
         reason = None
@@ -398,11 +434,11 @@ def upload_files(
                     "acknowledgement"
                 )
         if reason:
-            print(f"  Skipped: {reason}")
+            notify(f"  Skipped: {reason}")
             journal.append(
                 "skip", name=path.name, md5=digest, size=size, reason=reason
             )
-            continue
+            return "skipped"
         if (
             entry is not None
             and not force
@@ -428,7 +464,7 @@ def upload_files(
                     retries_sleep=retry_sleep,
                     headers={"x-archive-size-hint": str(total_size)},
                     request_kwargs={"timeout": (300, 300)},
-                    verbose=True,
+                    verbose=verbose,
                 )
 
             outcome = upload_with_recovery(
@@ -442,6 +478,9 @@ def upload_files(
                 journal,
                 policy,
                 force,
+                notify=notify if not verbose else None,
+                cancel=cancel,
+                on_state=on_state,
             )
             journal.append(
                 "upload_ok", name=path.name, md5=digest, size=size, **outcome
@@ -455,6 +494,49 @@ def upload_files(
                 error=type(exc).__name__,
             )
             raise
+        return "complete"
+
+    if workers == 1 or len(selected) <= 1:
+        for index, path in enumerate(selected, 1):
+            transfer(session, item, path, index, metadata)
+        return
+    entries = list(enumerate(selected, 1))
+    snapshot = deepcopy(item.item_metadata)
+    if not item.exists:
+        if selected[0].suffix.lower() != ".txt":
+            raise ValueError("A new item must start with its notes TXT")
+        transfer(session, item, selected[0], 1, metadata)
+        entries = entries[1:]
+        snapshot = {"metadata": {**metadata, "identifier": item.identifier}}
+    workers = min(workers, len(entries))
+
+    def concurrent(index, path, slot, board, cancel):
+        row = board.row(path, slot)
+        try:
+            with TransferSession(
+                row, cancel, config=deepcopy(session.config)
+            ) as active:
+                active.cookies.update(session.cookies)
+                worker_item = Item(active, item.identifier, deepcopy(snapshot))
+                state = transfer(
+                    active,
+                    worker_item,
+                    path,
+                    index,
+                    {},
+                    verbose=False,
+                    notify=row.message,
+                    cancel=cancel,
+                    on_state=row.status,
+                )
+                row.message(state.capitalize())
+        except Exception as exc:
+            row.message(f"Failed: {type(exc).__name__}")
+            raise
+        finally:
+            row.close()
+
+    run_parallel(entries, workers, concurrent)
 
 
 def tmux_session_name(identifier):
@@ -539,6 +621,9 @@ def parser():
         "--no-log",
         action="store_true",
         help="disable project logging and log-based recovery",
+    )
+    p.add_argument(
+        "--workers", type=int, help="simultaneous uploads; config default 3"
     )
     p.add_argument("--retries", type=int, default=10)
     p.add_argument("--retry-sleep", type=int, default=60)
@@ -715,6 +800,11 @@ def run_upload(args, directory, project, config):
                     args.trust_log,
                     args.force,
                     recovery=load_policy(config.get("recovery", {})),
+                    workers=upload_workers(
+                        args.workers
+                        if args.workers is not None
+                        else config.get("upload_workers", 3)
+                    ),
                 )
                 check_response(
                     session.submit_task(
@@ -745,6 +835,8 @@ def main(argv=None):
         raise ValueError("Retry settings cannot be negative.")
     args.config = config_path(args.config)
     config = load_config(args.config)
+    if args.workers is not None:
+        upload_workers(args.workers)
     if args.collections is not None:
         config["collections"] = {
             **config.get("collections", {}),
