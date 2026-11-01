@@ -485,7 +485,8 @@ class MultipartTests(unittest.TestCase):
         self.assertEqual(self.next_id, 1)
 
     def test_invalid_options_and_override_parsing(self):
-        self.assertFalse(multipart.load_options({}).enabled)
+        self.assertTrue(multipart.load_options({}).enabled)
+        self.assertFalse(multipart.load_options({"enabled": False}).enabled)
         for data in (
             {"enabled": "true"},
             {"part_size_mib": True},
@@ -494,5 +495,6 @@ class MultipartTests(unittest.TestCase):
         ):
             with self.subTest(data=data), self.assertRaises(ValueError):
                 multipart.load_options(data)
-        self.assertTrue(cli.parser().parse_args(["--resume"]).resume)
+        self.assertIsNone(cli.parser().parse_args([]).resume)
+        self.assertNotIn("--resume ", cli.parser().format_help())
         self.assertFalse(cli.parser().parse_args(["--no-resume"]).resume)

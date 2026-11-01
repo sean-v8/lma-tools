@@ -15,7 +15,7 @@ MIB = 1024 * 1024
 
 @dataclass(frozen=True)
 class MultipartOptions:
-    enabled: bool = False
+    enabled: bool = True
     part_size_mib: int = 16
 
     @property

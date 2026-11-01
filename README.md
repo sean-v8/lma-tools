@@ -220,13 +220,13 @@ use this upload recovery loop.
 
 ### Resuming large FLACs
 
-Multipart resume is experimental and opt-in. Enable it per run:
+Large FLACs use resumable multipart uploads by default:
 
 ```bash
-lmau --resume -uw 8 band2026-08-17.audience
+lmau -uw 8 band2026-08-17.audience
 ```
 
-Or set defaults in the shared config:
+Defaults in the shared config:
 
 ```toml
 [uploader.resume]
@@ -250,8 +250,8 @@ stored in the log.
 
 Keep the log to resume after stopping, restarting or disconnecting. A changed
 file or target cannot reuse an old checkpoint. The uploader checks the original
-file's full MD5 on every run. `--resume` requires logging: enable `log = true`
-and omit `--no-log`, or select `--no-resume` for ordinary PUTs.
+file's full MD5 on every run. Multipart resume requires logging: use
+`log = true` and omit `--no-log`, or select `--no-resume` for ordinary PUTs.
 
 The existing worker limit still applies across files; parts within a file are
 serial, so enabling resume does not multiply network concurrency. On resume,
@@ -269,10 +269,9 @@ retains the checkpoint and does not start a new upload ID; rerunning checks
 assembly instead of resending the whole file. After multipart assembly is
 verified, a log event clears its active checkpoint; the history is retained.
 
-Existing plain PUT transfers cannot be converted into multipart resumes. This
-backend has offline protocol and transport coverage; it still needs a
-controlled live interrupted/resumed upload against Archive. The protocol
-reference is
+Existing plain PUT transfers cannot be converted into multipart resumes.
+Interrupted parts have been recovered in live testing. Full-file assembly and
+derivation still need end-to-end live verification. The protocol reference is
 [ia-multipart](https://github.com/internetarchivecanada/ia-multipart); this
 package implements its own backend using the existing dependencies.
 

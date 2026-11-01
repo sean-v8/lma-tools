@@ -110,9 +110,7 @@ class ResumeLogTests(unittest.TestCase):
                     patch.object(cli, "edit_review") as editor,
                 ):
                     with self.assertRaisesRegex(ValueError, "requires upload"):
-                        cli.main(
-                            ["--config", str(config), "--resume", ID, *flags]
-                        )
+                        cli.main(["--config", str(config), ID, *flags])
                     session.assert_not_called()
                     editor.assert_not_called()
             config.write_text(

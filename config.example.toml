@@ -4,7 +4,7 @@ log = true
 upload_workers = 3
 
 [uploader.resume]
-enabled = false
+enabled = true
 part_size_mib = 16
 
 [uploader.recovery]

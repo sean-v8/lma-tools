@@ -795,14 +795,7 @@ def parser():
         type=int,
         help="simultaneous uploads; config default 3",
     )
-    resume = p.add_mutually_exclusive_group()
-    resume.add_argument(
-        "--resume",
-        dest="resume",
-        action="store_true",
-        help="resume large FLACs using multipart uploads (experimental)",
-    )
-    resume.add_argument(
+    p.add_argument(
         "--no-resume",
         dest="resume",
         action="store_false",

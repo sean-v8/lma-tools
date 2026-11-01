@@ -77,7 +77,8 @@ acceptance does not establish that Archive has finished processing it.
 
 ## File resume and the upload log
 
-`--resume` is opt-in, with defaults under `[uploader.resume]`. It streams
+Resume is enabled by default, with settings under `[uploader.resume]` and
+`--no-resume` as the command-line opt-out. It streams
 bounded parts directly from the original FLAC, serially within each file's
 worker slot. The default part size is 16 MiB. Small FLACs that fit in one part
 and non-FLAC files retain the ordinary PUT path. An existing checkpoint keeps
