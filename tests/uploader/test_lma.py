@@ -333,7 +333,7 @@ class WorkflowTests(unittest.TestCase):
             with (
                 patch.object(lma, "audio_runtime", return_value="1:00:00"),
                 patch.object(
-                    lma, "edit_review", side_effect=lambda i, m: (i, m)
+                    lma, "edit_review", side_effect=lambda i, m, **kw: (i, m)
                 ),
                 patch("builtins.input", return_value="no"),
                 patch.object(
@@ -410,7 +410,7 @@ class WorkflowTests(unittest.TestCase):
             with (
                 patch.object(lma, "audio_runtime", return_value="2:05:50"),
                 patch.object(
-                    lma, "edit_review", side_effect=lambda i, m: (i, m)
+                    lma, "edit_review", side_effect=lambda i, m, **kw: (i, m)
                 ),
                 patch.object(lma, "ArchiveSession", return_value=session),
                 patch("builtins.input", return_value="UPLOAD"),

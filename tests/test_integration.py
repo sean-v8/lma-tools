@@ -93,6 +93,7 @@ class IntegrationTests(unittest.TestCase):
                 patch.object(cli, "main", side_effect=fake_main),
                 patch.object(launcher.subprocess, "run") as run,
                 patch.object(launcher.os, "execvp") as execute,
+                patch.object(launcher, "ensure_dashboard"),
             ):
                 run.side_effect = [Mock(returncode=0), Mock(returncode=1)]
                 launcher.launch(argv)
@@ -119,9 +120,31 @@ class IntegrationTests(unittest.TestCase):
                 patch.object(launcher.sys.stdin, "isatty", return_value=True),
                 patch.object(launcher.sys.stdout, "isatty", return_value=True),
                 patch.object(cli, "main", return_value=7) as run,
+                patch.object(launcher.shutil, "which", return_value=None),
             ):
                 self.assertEqual(launcher.launch(arguments), 7)
                 run.assert_called_once_with(arguments)
+
+    def test_inside_tmux_tracks_actual_session_and_restores_environment(self):
+        with (
+            patch.dict(
+                os.environ, {"TMUX": "socket", "PATH": "/bin"}, clear=True
+            ),
+            patch.object(launcher.sys.stdin, "isatty", return_value=True),
+            patch.object(launcher.sys.stdout, "isatty", return_value=True),
+            patch.object(launcher.shutil, "which", return_value="/bin/tmux"),
+            patch.object(launcher, "ensure_dashboard") as ensure,
+            patch.object(
+                launcher.subprocess,
+                "run",
+                return_value=Mock(returncode=0, stdout="nephrok-session\n"),
+            ),
+            patch.object(cli, "main") as run,
+        ):
+            run.side_effect = lambda args: os.environ["LMA_UPLOAD_SESSION"]
+            self.assertEqual(launcher.launch([]), "nephrok-session")
+            self.assertNotIn("LMA_UPLOAD_SESSION", os.environ)
+            ensure.assert_called_once()
 
     def test_missing_config_exports(self):
         with tempfile.TemporaryDirectory() as tmp:

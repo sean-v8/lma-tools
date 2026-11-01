@@ -12,8 +12,8 @@ def upload_workers(value):
     return value
 
 
-def run_parallel(entries, workers, transfer, board=None):
-    board = board if board is not None else ProgressBoard()
+def run_parallel(entries, workers, transfer, board=None, tracker=None):
+    board = board if board is not None else ProgressBoard(tracker=tracker)
     entries = iter(entries)
     cancel = Event()
     pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="lmau")

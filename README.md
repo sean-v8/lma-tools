@@ -122,7 +122,7 @@ see [source inference](docs/SOURCE_PARSING.md).
 
 | Mode | Metadata | File transfers |
 | --- | --- | --- |
-| Default | Review metadata and runtime | Small files, then FLACs |
+| Default | Review metadata and runtime | Small files and FLACs |
 | `-m` | Review and update managed fields, including runtime | None |
 | `-r` | Update runtime only | None |
 | `-u` | No metadata or runtime changes | FLACs only |
@@ -133,6 +133,22 @@ upload-only runs queue derivation after successful file processing.
 `--preview` prints the plan without network access, an editor or writes.
 Metadata review uses Ctrl-S to accept and Ctrl-C to cancel; execution requires
 typing `UPLOAD`. Existing-item metadata is updated before file transfers.
+Before the interactive review, the uploader checks recent collection naming.
+It prefers the account email from `ia configure`, or matches the transferer
+name when that email is unavailable. Up to three recent personal uploads are
+checked first, then up to three other uploads if needed. A majority of at
+least two matching Creator/Title patterns seeds those fields with this show's
+venue and date. Conflicts, unfamiliar title formats and failed lookups leave
+local naming in place. A comment in the editor identifies the suggestion.
+Saved reviews take precedence; `--fresh-metadata` starts a fresh review.
+Existing items use their current Creator/Title when starting a fresh review.
+The offline `--preview` command does not perform this lookup.
+
+`-m` permits reviewed Creator and Title corrections with server-side checks
+against concurrent changes. Normal upload/resume runs still protect those
+fields. Identifier, Collection and Mediatype remain protected on existing
+items; Archive may impose additional restrictions. Descriptions are sent as
+escaped plain text so angle-bracket email credits remain visible.
 Show files are never changed, moved or deleted.
 
 Only direct TXT/JPG/MD5/FFP/FLAC files are eligible. Runtime is summed from
@@ -147,12 +163,15 @@ new item's first notes TXT is confirmed, remaining small files and FLACs
 share the same bounded pool. Existing-item metadata updates finish before
 any file transfer starts. Upload-only mode does not edit metadata or runtime.
 
-Each active file has its own progress bar, byte count and IEC speed. Bar rows
-are reused as files finish. Recovery messages identify the affected file;
+Each active file has its own progress bar, byte count and IEC speed. Active
+rows stay in file order; completed rows disappear and the remaining rows close
+the gap. Long filenames shorten to keep speeds visible. Routine start/finish
+messages are suppressed in this display. Recovery messages identify the file;
 one file's retry does not restart the others. Redirected output uses ordinary
 status lines without cursor controls.
 
-Set `upload_workers` under `[uploader]` in config.toml, or override per run:
+Set `upload_workers` under `[uploader]` in config.toml, or override per run
+with `-w` / `--workers`:
 
 ```bash
 lmau --workers 3 band2026-08-17.audience
@@ -197,9 +216,27 @@ use this upload recovery loop.
 ### tmux sessions
 
 Interactive uploads and updates open a unique tmux session unless already
-inside tmux. Detach with Ctrl-b then d. Reconnect with
-`tmux attach -t SESSION_NAME`; the session retains a shell and exit status
-after completion. A host reboot stops the session.
+inside tmux. Detach with Ctrl-b then d. Reconnect with `tmux attach -t
+SESSION_NAME`; the session retains a shell and exit status after completion.
+New session names start with the show identifier, without an added prefix. A
+host reboot stops the session.
+
+The first interactive tmux run also starts a detached `lmau` dashboard. View it
+with `tmux attach -t lmau`. Inside tmux, use `tmux switch-client -t lmau`. Each
+show has a compact aggregate byte/rate bar and a count of confirmed files. The
+total covers files selected by that run; `-u` covers FLACs only. Verified skips
+count immediately when checked. Sent bytes include in-flight data, so 100% may
+still await acknowledgement or derivation submission. Retries reset that file's
+in-flight count; interrupted runs retain only confirmed bytes. These counters
+never authorize a skip or provide partial-file resume.
+
+Progress snapshots are private local state under
+`$XDG_STATE_HOME/lma-tools/uploads`, or `~/.local/state/lma-tools/uploads`. The
+display keeps live runs and the six latest finished runs. Stale runs are
+labelled, and snapshots expire after 24 hours without updates. Closing the
+dashboard does not stop uploads; a later interactive run recreates it. Runs
+started before this version cannot report their progress. An existing session
+named `lmau` is left untouched.
 
 Listing, help, completion, previews and noninteractive runs execute directly.
 `LMA_NO_TMUX=1` bypasses tmux. Exported variables referenced by uploader config

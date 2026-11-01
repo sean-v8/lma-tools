@@ -210,7 +210,7 @@ class TransferTests(unittest.TestCase):
         data = {"metadata": {"identifier": ID}, "files": []} if exists else {}
         return Item(self.parent, ID, data)
 
-    def upload(self, files, exists=True, policy=None):
+    def upload(self, files, exists=True, policy=None, tracker=None):
         cli.upload_files(
             self.parent,
             self.item(exists),
@@ -221,6 +221,7 @@ class TransferTests(unittest.TestCase):
             0,
             recovery=policy or RecoveryPolicy(retries=0),
             workers=3,
+            tracker=tracker,
         )
 
     def test_all_file_types_overlap_with_independent_closed_sessions(self):
@@ -243,6 +244,23 @@ class TransferTests(unittest.TestCase):
             all("x-archive-meta00-title" not in c[2] for c in self.calls)
         )
         self.assertEqual(len(self.journal.events()), 10)
+
+    def test_dashboard_counts_each_concurrent_body_once(self):
+        from lma_tools.uploader.dashboard import ShowProgress
+
+        files = self.files(["one.flac", "two.flac", "three.flac"])
+        self.first_wave = {p.name for p in files}
+        self.barrier = Barrier(3)
+        tracker = ShowProgress(ID, files, "test", self.root / "state")
+        try:
+            self.upload(files, tracker=tracker)
+            tracker.publish()
+            self.assertEqual(tracker.data["sent"], tracker.data["total"])
+            self.assertEqual(tracker.data["confirmed"], tracker.data["total"])
+            self.assertEqual(tracker.data["completed"], 3)
+            self.assertEqual(tracker.wire, tracker.data["total"])
+        finally:
+            tracker.close("done")
 
     def test_creation_txt_is_confirmed_before_other_files_start(self):
         names = ["notes.txt", "tracks.ffp", "cover.jpg", "one.flac"]
@@ -357,6 +375,9 @@ class TransferTests(unittest.TestCase):
             ):
                 self.upload(self.files(["one.flac", "two.flac", "three.flac"]))
         self.assertEqual(len(rows), 3)
+        self.assertEqual(sorted(row.order for row in rows), [1, 2, 3])
+        self.assertNotIn("] Checking", stream.getvalue())
+        self.assertNotIn(": Complete", stream.getvalue())
         for row in rows:
             self.assertEqual(row.bar.n, row.path.stat().st_size)
         self.assertTrue(all(row.bar.disable for row in rows))
@@ -408,7 +429,7 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(row.begin.call_count, 2)
         self.assertEqual(sum(c.args[0] for c in row.advance.call_args_list), 4)
 
-    def test_bars_have_fixed_slots_and_reuse_fork_byte_speed_format(self):
+    def test_bars_reuse_fork_byte_speed_format(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "one.flac"
             path.write_bytes(b"audio-data")
@@ -427,15 +448,87 @@ class ProgressTests(unittest.TestCase):
                     self.assertIn(
                         "B/s", rows[0].bar.format_dict["upload_rate"]
                     )
-                    self.assertIn(
-                        "awaiting acknowledgement", rows[0].bar.postfix
-                    )
+                    self.assertIn("awaiting ack", rows[0].bar.postfix)
                     rows[0].begin()
                     self.assertEqual(rows[0].bar.n, 0)
                 finally:
                     for row in rows:
                         row.close()
             self.assertIn("one.flac", stream.getvalue())
+
+    def test_active_rows_sort_by_file_order_and_close_gaps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "one.flac"
+            path.write_bytes(b"audio")
+            with patch.dict("os.environ", TERM="xterm"):
+                board = ProgressBoard(TtyBuffer())
+                third = board.row(path, 3)
+                first = board.row(path, 1)
+                second = board.row(path, 2)
+                try:
+                    self.assertEqual(board.rows, [first, second, third])
+                    self.assertEqual(
+                        [abs(row.bar.pos) for row in board.rows], [0, 1, 2]
+                    )
+                    second.close()
+                    fourth = board.row(path, 4)
+                    self.assertEqual(board.rows, [first, third, fourth])
+                    self.assertEqual(
+                        [abs(row.bar.pos) for row in board.rows], [0, 1, 2]
+                    )
+                    fourth.close()
+                finally:
+                    first.close()
+                    second.close()
+                    third.close()
+                self.assertEqual(board.rows, [])
+
+    def test_long_names_keep_rates_visible_on_narrow_terminals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ("band2026-01-01." * 9 + "s1t01.flac")
+            path.write_bytes(b"audio-data")
+            with patch.dict("os.environ", TERM="xterm"):
+                row = ProgressBoard(TtyBuffer()).row(path, 1)
+                try:
+                    row.bar.dynamic_ncols = None
+                    row.bar.ncols = 80
+                    for state in ("checking", "", "verifying", "awaiting ack"):
+                        row.status(state)
+                        text = str(row.bar)
+                        self.assertLessEqual(len(text), 80)
+                        self.assertIn("B/s", text)
+                        self.assertIn("s1t01.flac", text)
+                        self.assertIn("…", text)
+                finally:
+                    row.close()
+
+    def test_tty_finishing_does_not_append_duplicate_status_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "one.flac"
+            path.write_bytes(b"audio")
+            stream = TtyBuffer()
+            with patch.dict("os.environ", TERM="xterm"):
+                row = ProgressBoard(stream).row(path, 1)
+                try:
+                    row.finish("complete")
+                    self.assertEqual(row.bar.postfix, "complete")
+                    self.assertNotIn("one.flac: Complete", stream.getvalue())
+                    row.message("Warning: remote confirmation delayed")
+                    self.assertIn(
+                        "Warning: remote confirmation", stream.getvalue()
+                    )
+                finally:
+                    row.close()
+
+    def test_non_tty_finishing_retains_plain_status_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "one.flac"
+            path.write_bytes(b"audio")
+            stream = io.StringIO()
+            row = ProgressBoard(stream).row(path, 1)
+            row.finish("skipped")
+            row.close()
+            self.assertEqual(stream.getvalue(), "one.flac: Skipped\n")
 
     def test_redirected_progress_contains_no_cursor_escape_codes(self):
         with tempfile.TemporaryDirectory() as tmp:

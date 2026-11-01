@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import html
 import json
 import os
 import re
@@ -36,13 +37,27 @@ from .core import (
     validate_fingerprints,
 )
 from .parallel import run_parallel, upload_workers
-from .progress import TransferSession, check_cancelled
+from .progress import (
+    TransferSession,
+    check_cancelled,
+    watch_transfer,
+)
 from .recovery import (
     RecoveryPolicy,
     head_state,
     load_policy,
     upload_with_recovery,
 )
+
+
+def transport_metadata(metadata):
+    """Encode reviewed plain text for Archive's HTML description field."""
+    payload = dict(metadata)
+    if "description" in payload:
+        payload["description"] = html.escape(
+            payload["description"], quote=False
+        )
+    return payload
 
 
 def load_config(path):
@@ -224,10 +239,16 @@ def parse_review(text):
     return identifier, metadata
 
 
-def edit_review(identifier, metadata):
+def edit_review(identifier, metadata, *, history=True):
+    from .history import suggest
     from .ui import edit_document
 
-    return edit_document(review_text(identifier, metadata), parse_review)
+    note = "Saved review retained; history suggestions not reapplied."
+    if history:
+        print("Checking recent collection naming...", flush=True)
+        metadata, note = suggest(identifier, metadata)
+    document = "# " + note + "\n" + review_text(identifier, metadata)
+    return edit_document(document, parse_review)
 
 
 class Journal:
@@ -392,6 +413,7 @@ def upload_files(
     force=False,
     recovery=None,
     workers=1,
+    tracker=None,
 ):
     policy = recovery if recovery is not None else RecoveryPolicy()
     workers = upload_workers(workers)
@@ -409,9 +431,13 @@ def upload_files(
         notify=print,
         cancel=None,
         on_state=None,
+        quiet=False,
     ):
         check_cancelled(cancel)
-        notify(f"[{index}/{len(selected)}] Checking {path.name}", flush=True)
+        if not quiet:
+            notify(
+                f"[{index}/{len(selected)}] Checking {path.name}", flush=True
+            )
         digest, size, stamp = file_md5(path)
         entry = remote.get(path.name)
         reason = None
@@ -434,7 +460,10 @@ def upload_files(
                     "acknowledgement"
                 )
         if reason:
-            notify(f"  Skipped: {reason}")
+            if tracker is not None:
+                tracker.complete(path.name)
+            if not quiet:
+                notify(f"  Skipped: {reason}")
             journal.append(
                 "skip", name=path.name, md5=digest, size=size, reason=reason
             )
@@ -456,7 +485,7 @@ def upload_files(
                 return item.upload_file(
                     str(path),
                     key=path.name,
-                    metadata=metadata,
+                    metadata=transport_metadata(metadata),
                     checksum=False,
                     verify=True,
                     queue_derive=False,
@@ -467,21 +496,24 @@ def upload_files(
                     verbose=verbose,
                 )
 
-            outcome = upload_with_recovery(
-                send,
-                session,
-                item.identifier,
-                path,
-                digest,
-                size,
-                stamp,
-                journal,
-                policy,
-                force,
-                notify=notify if not verbose else None,
-                cancel=cancel,
-                on_state=on_state,
-            )
+            with watch_transfer(session, path, tracker):
+                outcome = upload_with_recovery(
+                    send,
+                    session,
+                    item.identifier,
+                    path,
+                    digest,
+                    size,
+                    stamp,
+                    journal,
+                    policy,
+                    force,
+                    notify=notify if not verbose else None,
+                    cancel=cancel,
+                    on_state=on_state,
+                )
+            if tracker is not None:
+                tracker.complete(path.name)
             journal.append(
                 "upload_ok", name=path.name, md5=digest, size=size, **outcome
             )
@@ -511,7 +543,7 @@ def upload_files(
     workers = min(workers, len(entries))
 
     def concurrent(index, path, slot, board, cancel):
-        row = board.row(path, slot)
+        row = board.row(path, index)
         try:
             with TransferSession(
                 row, cancel, config=deepcopy(session.config)
@@ -528,21 +560,22 @@ def upload_files(
                     notify=row.message,
                     cancel=cancel,
                     on_state=row.status,
+                    quiet=board.enabled,
                 )
-                row.message(state.capitalize())
+                row.finish(state)
         except Exception as exc:
             row.message(f"Failed: {type(exc).__name__}")
             raise
         finally:
             row.close()
 
-    run_parallel(entries, workers, concurrent)
+    run_parallel(entries, workers, concurrent, tracker=tracker)
 
 
 def tmux_session_name(identifier):
     show_identity(identifier)
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", identifier)
-    return f"lma_{safe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    return f"{safe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 
 def parser():
@@ -623,7 +656,10 @@ def parser():
         help="disable project logging and log-based recovery",
     )
     p.add_argument(
-        "--workers", type=int, help="simultaneous uploads; config default 3"
+        "-w",
+        "--workers",
+        type=int,
+        help="simultaneous uploads; config default 3",
     )
     p.add_argument("--retries", type=int, default=10)
     p.add_argument("--retry-sleep", type=int, default=60)
@@ -675,7 +711,9 @@ def run_upload(args, directory, project, config):
             ).strip()
         metadata.update(collection=collection or "", runtime=runtime)
         if not args.preview:
-            identifier, metadata = edit_review(identifier, metadata)
+            identifier, metadata = edit_review(
+                identifier, metadata, history=not bool(previous)
+            )
             metadata["runtime"] = runtime
             journal = Journal(
                 project / f"{identifier}_lma.log", identifier, journal.enabled
@@ -718,6 +756,16 @@ def run_upload(args, directory, project, config):
         trust_log=args.trust_log,
         force=args.force,
     )
+    tracker = None
+    if files and os.environ.get("LMA_UPLOAD_SESSION"):
+        from .dashboard import ShowProgress
+
+        try:
+            tracker = ShowProgress(
+                identifier, files, os.environ["LMA_UPLOAD_SESSION"]
+            )
+        except OSError:
+            print("Dashboard unavailable; continuing upload.", flush=True)
     try:
         session = ArchiveSession()
         if not session.access_key or not session.secret_key:
@@ -733,7 +781,10 @@ def run_upload(args, directory, project, config):
         if existed and not args.upload:
             ensure_complete_runtime(item, flacs)
         if existed and not (args.upload or args.runtime):
-            for key in ("creator", "title", "date", "collection", "mediatype"):
+            fields = ["date", "collection", "mediatype"]
+            if not args.metadata:
+                fields += ["creator", "title"]
+            for key in fields:
                 remote = item.metadata.get(key)
                 if metadata[key] not in (
                     remote if isinstance(remote, list) else [remote]
@@ -774,13 +825,27 @@ def run_upload(args, directory, project, config):
                     "collection",
                     "uploader",
                 }
+                if args.metadata:
+                    protected -= {"creator", "title"}
                 payload = {
                     key: value
                     for key, value in metadata.items()
                     if key not in protected
                 }
                 print("Updating metadata before file transfers...", flush=True)
-                check_response(item.modify_metadata(payload, timeout=60))
+                options = {"timeout": 60}
+                if args.metadata:
+                    options["expect"] = {
+                        key: item.metadata[key]
+                        for key in ("creator", "title")
+                        if key in item.metadata
+                        and metadata[key] != item.metadata[key]
+                    }
+                check_response(
+                    item.modify_metadata(
+                        transport_metadata(payload), **options
+                    )
+                )
                 journal.append("metadata_ok", metadata=payload)
                 print(f"Metadata accepted; runtime {runtime}.", flush=True)
             elif not existed:
@@ -800,12 +865,15 @@ def run_upload(args, directory, project, config):
                     args.trust_log,
                     args.force,
                     recovery=load_policy(config.get("recovery", {})),
+                    tracker=tracker,
                     workers=upload_workers(
                         args.workers
                         if args.workers is not None
                         else config.get("upload_workers", 3)
                     ),
                 )
+                if tracker is not None:
+                    tracker.status("deriving")
                 check_response(
                     session.submit_task(
                         identifier,
@@ -816,7 +884,13 @@ def run_upload(args, directory, project, config):
                 )
                 journal.append("derive_queued")
         journal.append("run_ok")
+        if tracker is not None:
+            tracker.close("done")
     except BaseException as exc:
+        if tracker is not None:
+            tracker.close(
+                "cancelled" if isinstance(exc, KeyboardInterrupt) else "failed"
+            )
         data = {"error": type(exc).__name__}
         if isinstance(exc, HTTPError) and exc.response is not None:
             data.update(
