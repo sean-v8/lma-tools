@@ -700,8 +700,7 @@ def run_upload(args, directory, project, config):
                 print(f"Metadata accepted; runtime {runtime}.", flush=True)
             elif not existed:
                 print(
-                    "Creating item: first TXT upload carries the reviewed "
-                    "metadata.",
+                    f"Creating item: https://archive.org/details/{identifier}",
                     flush=True,
                 )
             if not args.metadata:
