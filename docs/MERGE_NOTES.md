@@ -57,7 +57,8 @@ starting other transfers. Existing metadata edits remain before transfers.
 Tests run real Archive request construction against an in-memory transport;
 they check simultaneous small/FLAC transfers, Content-Length, creation
 ordering, independent timeout recovery, session cleanup, fatal failure
-handling and derivation only after all files succeed. Additional checks cover
+handling and the final derive request only after all files succeed.
+Additional checks cover
 cancellation, interruptible retry waits, progress byte counts excluding local
 hash reads, and concurrent journal integrity. No live uploads were performed.
 
@@ -109,3 +110,9 @@ entries or when their snapshot expires; they remain in memory until the
 view closes. A new view excludes runs finished before it opened. Tests cover
 weighted totals, rate exclusions, completion transitions, more than six
 retained successes, view reopening and missing/stale snapshots.
+
+FLAC PUTs now request derivation individually using the native IAS3 header.
+Small-file PUTs keep it disabled. A final item derive request remains after
+all selected files complete or are verified and skipped. Transport tests
+check the actual per-file header and still verify final-request ordering.
+No live uploads or derive tasks were submitted during this change.

@@ -424,7 +424,9 @@ class WorkflowTests(unittest.TestCase):
             )
             self.assertEqual(calls[0].kwargs["metadata"]["runtime"], "2:05:50")
             self.assertNotIn("setlist", calls[0].kwargs["metadata"])
-            self.assertTrue(all(not c.kwargs["queue_derive"] for c in calls))
+            self.assertEqual(
+                [c.kwargs["queue_derive"] for c in calls], [False, False, True]
+            )
             session.submit_task.assert_called_once()
 
 

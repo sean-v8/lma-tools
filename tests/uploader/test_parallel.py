@@ -237,6 +237,11 @@ class TransferTests(unittest.TestCase):
         self.upload(self.files(names))
         self.assertEqual(self.peak, 3)
         self.assertEqual(len(self.calls), 5)
+        for name, _, headers in self.calls:
+            self.assertEqual(
+                headers["x-archive-queue-derive"],
+                "1" if name.endswith(".flac") else "0",
+            )
         self.assertEqual(len(set(self.sessions)), 5)
         self.assertCountEqual(self.closed, self.sessions)
         self.assertTrue(all(c[1] is not self.parent for c in self.calls))
@@ -346,7 +351,7 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(self.sessions, [])
         self.assertTrue(all(c[1] is self.parent for c in self.calls))
 
-    def test_failed_parallel_run_does_not_derive_and_logs_other_successes(
+    def test_failed_parallel_run_skips_final_derive_and_logs_other_successes(
         self,
     ):
         self.fail_name = "one.flac"

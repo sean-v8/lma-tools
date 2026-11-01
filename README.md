@@ -128,7 +128,10 @@ see [source inference](docs/SOURCE_PARSING.md).
 | `-u` | No metadata or runtime changes | FLACs only |
 
 For example, `lmau -u band2026-08-17.audience` uploads only FLACs. Normal and
-upload-only runs queue derivation after successful file processing.
+upload-only runs request derivation with each newly uploaded FLAC. A final
+request after all files succeed or are verified and skipped catches any
+remaining work. Small-file PUTs do not request derivation. Archive controls
+when queued tasks run; upload completion does not mean derivation is done.
 
 `--preview` prints the plan without network access, an editor or writes.
 Metadata review uses Ctrl-S to accept and Ctrl-C to cancel; execution requires

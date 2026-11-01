@@ -488,7 +488,7 @@ def upload_files(
                     metadata=transport_metadata(metadata),
                     checksum=False,
                     verify=True,
-                    queue_derive=False,
+                    queue_derive=path.suffix.lower() == ".flac",
                     retries=retries,
                     retries_sleep=retry_sleep,
                     headers={"x-archive-size-hint": str(total_size)},
