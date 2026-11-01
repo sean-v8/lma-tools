@@ -62,6 +62,22 @@ class ColumnTests(unittest.TestCase):
                     for row in rows:
                         row.close()
 
+    def test_resume_counts_checkpointed_bytes_without_an_inflated_rate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "one.flac"
+            path.write_bytes(b"x" * 100)
+            with patch.dict("os.environ", TERM="xterm"):
+                row = ProgressBoard(TtyBuffer()).row(path, 1)
+                try:
+                    row.resume(80)
+                    values = row.bar.format_dict
+                    self.assertEqual(values["n"], 80)
+                    self.assertEqual(values["upload_rate"], "0.00 B/s")
+                    row.advance(10)
+                    self.assertEqual(row.bar.n, 90)
+                finally:
+                    row.close()
+
     def test_dashboard_rows_use_longest_label_and_same_bar_width(self):
         bars = []
         columns = SharedColumns(timing=False)

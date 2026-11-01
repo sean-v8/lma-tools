@@ -203,11 +203,12 @@ approved metadata, transfer outcomes and recovery history. `--no-log` or
 works. `--fresh-metadata` reparses notes instead of reusing reviewed defaults.
 
 After a timeout or dropped connection, bounded recovery waits and verifies
-remote MD5 and size before resending. A confirmed complete file advances to
-the next file automatically. Confirmed absence permits retransmission; unknown
+remote MD5 and size before resending. A confirmed complete file advances to the
+next file automatically. Confirmed absence permits retransmission; unknown
 remote state triggers more checks without resending. A 100% progress bar alone
-is not confirmation. Incomplete files restart in full, without byte-offset
-resume. Recovery uses the existing approval and tmux session.
+is not confirmation. Ordinary PUTs restart incomplete files in full. Opt-in
+multipart uploads resume acknowledged parts. Recovery uses the existing
+approval and tmux session.
 
 Defaults allow three additional recovery rounds or retransmissions, with
 three checks per uncertain round and exponential waits from 30 to 300 seconds.
@@ -216,6 +217,64 @@ CLI `--retries` and `--retry-sleep` separately control the upload library's
 503 retries. Authentication errors, certificate errors, local file changes
 and Ctrl-C stop the run. Metadata edits and the final derive request do not
 use this upload recovery loop.
+
+### Resuming large FLACs
+
+Multipart resume is experimental and opt-in. Enable it per run:
+
+```bash
+lmau --resume -uw 8 band2026-08-17.audience
+```
+
+Or set defaults in the shared config:
+
+```toml
+[uploader.resume]
+enabled = true
+part_size_mib = 16
+```
+
+`--no-resume` overrides that default. Small FLACs that fit in one part and all
+non-FLAC files keep the ordinary PUT path. A multipart checkpoint already
+present is resumed with its original part size. New part sizes must be whole
+MiB values from 5 through 1024, with at most 10000 parts per file.
+
+Parts stream directly from the original FLAC. No temporary audio copies,
+partial downloads or separate resume files are created. Upload IDs, file
+fingerprints, acknowledged part checksums and completion state are stored as
+JSON events in the existing `<identifier>_lma.log` in the project root, outside
+the upload folder. Part events are incremental, flushed and synced; the whole
+checkpoint is not rewritten after every part. Log writes are locked across
+upload threads and files use private permissions. API credentials are never
+stored in the log.
+
+Keep the log to resume after stopping, restarting or disconnecting. A changed
+file or target cannot reuse an old checkpoint. The uploader checks the original
+file's full MD5 on every run. `--resume` requires logging: enable `log = true`
+and omit `--no-log`, or select `--no-resume` for ordinary PUTs.
+
+The existing worker limit still applies across files; parts within a file are
+serial, so enabling resume does not multiply network concurrency. On resume,
+the uploader compares local part hashes with Archive's part listing when
+supported. If listing is unavailable, locally acknowledged parts are reused;
+completion must validate the part MD5s and the final remote size and whole-file
+MD5 must match before the file is counted as complete. A missing part
+acknowledgement can cost one part again, rather than the whole file.
+
+Recovery uses `[uploader.recovery]` for part-request retry budgets and waits.
+Completion verification still runs when `retries = 0`. Multipart completion
+requests derivation for that FLAC. Assembly is asynchronous, so a 100% bar can
+say `assembling` while the file is not yet visible. An uncertain completion
+retains the checkpoint and does not start a new upload ID; rerunning checks
+assembly instead of resending the whole file. After multipart assembly is
+verified, a log event clears its active checkpoint; the history is retained.
+
+Existing plain PUT transfers cannot be converted into multipart resumes. This
+backend has offline protocol and transport coverage; it still needs a
+controlled live interrupted/resumed upload against Archive. The protocol
+reference is
+[ia-multipart](https://github.com/internetarchivecanada/ia-multipart); this
+package implements its own backend using the existing dependencies.
 
 ### tmux sessions
 
@@ -233,8 +292,8 @@ bar and metric widths. The total covers files selected by that run; `-u` covers
 FLACs only. Verified skips count immediately when checked. Sent bytes include
 in-flight data, so 100% may still await acknowledgement or derivation
 submission. Retries reset that file's in-flight count; interrupted runs retain
-only confirmed bytes. These counters never authorize a skip or provide
-partial-file resume.
+confirmed files and checkpointed multipart bytes. These counters never
+authorize a skip; multipart checkpoints and remote verification control resume.
 
 Progress snapshots are private local state under
 `$XDG_STATE_HOME/lma-tools/uploads`, or `~/.local/state/lma-tools/uploads`. The

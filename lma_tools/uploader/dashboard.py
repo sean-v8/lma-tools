@@ -74,6 +74,7 @@ class ShowProgress:
         self.sizes = {p.name: p.stat().st_size for p in files}
         self.confirmed = set()
         self.active = {}
+        self.partial = {}
         self.wire = 0
         self.lock = RLock()
         self.stop = Event()
@@ -143,10 +144,17 @@ class ShowProgress:
             self.active[name] = self.active.get(name, 0) + size
             self.wire += size
 
+    def resume(self, name, offset):
+        with self.lock:
+            self.active[name] = offset
+            self.partial[name] = offset
+            self.data["status"] = "uploading"
+
     def complete(self, name):
         with self.lock:
             self.confirmed.add(name)
             self.active.pop(name, None)
+            self.partial.pop(name, None)
 
     def status(self, value):
         with self.lock:
@@ -157,7 +165,7 @@ class ShowProgress:
         self.thread.join()
         with self.lock:
             self.data["status"] = status
-            self.active.clear()
+            self.active = dict(self.partial)
         self.publish()
 
 
@@ -240,7 +248,7 @@ def dashboard(directory):
                 bar._ema_dn = lambda value=job["rate"]: value
                 bar._ema_dt = lambda: 1
                 bar.set_postfix_str(
-                    f"{job['completed']}/{job['files']} confirmed, "
+                    f"{job['completed']}/{job['files']} completed, "
                     + job["status"],
                     refresh=False,
                 )

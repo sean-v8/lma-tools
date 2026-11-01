@@ -115,6 +115,28 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(data["status"], "cancelled")
             self.assertFalse(tracker.thread.is_alive())
 
+    def test_resumed_parts_credit_bytes_without_counting_wire_or_whole_files(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            file = root / "one.flac"
+            file.write_bytes(b"x" * 100)
+            tracker = dashboard.ShowProgress(
+                "artist2026-08-17", [file], "show", root / "state"
+            )
+            try:
+                tracker.resume(file.name, 40)
+                tracker.advance(file.name, 10)
+                tracker.publish()
+                self.assertEqual(tracker.data["sent"], 50)
+                self.assertEqual(tracker.data["confirmed"], 0)
+                self.assertEqual(tracker.data["completed"], 0)
+                self.assertEqual(tracker.wire, 10)
+            finally:
+                tracker.close("cancelled")
+            self.assertEqual(tracker.data["sent"], 40)
+
     def test_stale_jobs_are_labelled_and_old_snapshots_expire(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

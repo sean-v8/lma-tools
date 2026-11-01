@@ -36,8 +36,14 @@ from .core import (
     show_identity,
     validate_fingerprints,
 )
+from .multipart import (
+    MultipartOptions,
+    MultipartUpload,
+    load_options,
+)
 from .parallel import run_parallel, upload_workers
 from .progress import (
+    ProgressBoard,
     TransferSession,
     check_cancelled,
     watch_transfer,
@@ -73,6 +79,7 @@ def load_config(path):
         "collections",
         "recovery",
         "upload_workers",
+        "resume",
     }
     if unknown:
         raise ValueError(f"Unknown uploader config keys: {sorted(unknown)}")
@@ -90,6 +97,7 @@ def load_config(path):
     validate(config.get("collections", {}))
     load_policy(config.get("recovery", {}))
     upload_workers(config.get("upload_workers", 3))
+    load_options(config.get("resume", {}))
     return config
 
 
@@ -259,6 +267,89 @@ class Journal:
     def __init__(self, path, identifier, enabled=True):
         self.path, self.identifier, self.enabled = path, identifier, enabled
         self._lock = RLock()
+        self._resume_cache = None
+        self._resume_stamp = None
+
+    def _resume_file_stamp(self):
+        try:
+            stat = self.path.stat()
+            return stat.st_size, stat.st_mtime_ns
+        except FileNotFoundError:
+            return None
+
+    def _load_resume(self):
+        stamp = self._resume_file_stamp()
+        if self._resume_cache is not None and stamp == self._resume_stamp:
+            return
+        self._resume_cache = {}
+        for event in self._events():
+            name = event.get("name")
+            if not isinstance(name, str):
+                continue
+            kind = event.get("event")
+            if kind == "resume_start":
+                self._resume_cache[name] = event.get("state")
+                continue
+            state = self._resume_cache.get(name)
+            if not isinstance(state, dict) or (
+                event.get("upload_id") != state.get("upload_id")
+            ):
+                continue
+            if kind == "resume_part" and isinstance(state.get("parts"), dict):
+                state["parts"][str(event.get("number"))] = event.get("md5")
+            elif kind == "resume_phase":
+                state["phase"] = event.get("phase")
+            elif kind == "resume_clear":
+                self._resume_cache.pop(name, None)
+        self._resume_stamp = stamp
+
+    def resume_state(self, name):
+        with self._lock:
+            self._load_resume()
+            return deepcopy(self._resume_cache.get(name))
+
+    def save_resume(self, name, state):
+        if not self.enabled:
+            raise ValueError("File resume requires upload logging.")
+        with self._lock:
+            self._load_resume()
+            previous = self._resume_cache.get(name)
+            restart = not isinstance(previous, dict) or any(
+                previous.get(key) != state.get(key)
+                for key in ("upload_id", "signature", "part_bytes", "version")
+            )
+            if not restart:
+                restart = not set(previous["parts"]) <= set(state["parts"])
+            if restart:
+                self._append("resume_start", name=name, state=state)
+            else:
+                for number, digest in state["parts"].items():
+                    if previous["parts"].get(number) != digest:
+                        self._append(
+                            "resume_part",
+                            name=name,
+                            upload_id=state["upload_id"],
+                            number=int(number),
+                            md5=digest,
+                        )
+                if previous["phase"] != state["phase"]:
+                    self._append(
+                        "resume_phase",
+                        name=name,
+                        upload_id=state["upload_id"],
+                        phase=state["phase"],
+                    )
+            self._resume_cache[name] = deepcopy(state)
+            self._resume_stamp = self._resume_file_stamp()
+
+    def clear_resume(self, name, upload_id):
+        with self._lock:
+            self._load_resume()
+            state = self._resume_cache.get(name)
+            if isinstance(state, dict) and state.get("upload_id") == upload_id:
+                self._append("resume_clear", name=name, upload_id=upload_id)
+                self._resume_cache.pop(name, None)
+                self._resume_stamp = self._resume_file_stamp()
 
     def events(self):
         with self._lock:
@@ -268,7 +359,7 @@ class Journal:
         if not self.enabled or not self.path.exists():
             return []
         events = []
-        with self.path.open(encoding="utf-8") as handle:
+        with self.path.open("rb") as handle:
             for line in handle:
                 try:
                     record = json.loads(line)
@@ -298,10 +389,21 @@ class Journal:
         )
         # Prefix newline means even a previous torn write cannot consume this
         # event.
-        with self.path.open("a", encoding="utf-8") as handle:
+        existed = self.path.exists()
+        descriptor = os.open(
+            self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600
+        )
+        with os.fdopen(descriptor, "a", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o600)
             handle.write("\n" + json.dumps(record, ensure_ascii=False) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
+        if not existed:
+            descriptor = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
 
     def acknowledgement(self, name, digest, size):
         for record in reversed(self.events()):
@@ -414,7 +516,9 @@ def upload_files(
     recovery=None,
     workers=1,
     tracker=None,
+    multipart=None,
 ):
+    options = multipart if multipart is not None else MultipartOptions()
     policy = recovery if recovery is not None else RecoveryPolicy()
     workers = upload_workers(workers)
     selected = list(files)
@@ -432,6 +536,7 @@ def upload_files(
         cancel=None,
         on_state=None,
         quiet=False,
+        progress=None,
     ):
         check_cancelled(cancel)
         if not quiet:
@@ -496,22 +601,51 @@ def upload_files(
                     verbose=verbose,
                 )
 
-            with watch_transfer(session, path, tracker):
-                outcome = upload_with_recovery(
-                    send,
-                    session,
-                    item.identifier,
-                    path,
-                    digest,
-                    size,
-                    stamp,
-                    journal,
-                    policy,
-                    force,
-                    notify=notify if not verbose else None,
-                    cancel=cancel,
-                    on_state=on_state,
+            if (
+                options.enabled
+                and path.suffix.lower() == ".flac"
+                and (
+                    size > options.part_bytes
+                    or journal.resume_state(path.name) is not None
                 )
+            ):
+                own_row = progress is None
+                if own_row:
+                    progress = ProgressBoard(tracker=tracker).row(path, index)
+                try:
+                    outcome = MultipartUpload(
+                        session,
+                        item.identifier,
+                        path,
+                        digest,
+                        size,
+                        stamp,
+                        journal,
+                        options,
+                        policy,
+                        progress,
+                        cancel,
+                    ).run()
+                finally:
+                    if own_row:
+                        progress.close()
+            else:
+                with watch_transfer(session, path, tracker):
+                    outcome = upload_with_recovery(
+                        send,
+                        session,
+                        item.identifier,
+                        path,
+                        digest,
+                        size,
+                        stamp,
+                        journal,
+                        policy,
+                        force,
+                        notify=notify if not verbose else None,
+                        cancel=cancel,
+                        on_state=on_state,
+                    )
             if tracker is not None:
                 tracker.complete(path.name)
             journal.append(
@@ -561,6 +695,7 @@ def upload_files(
                     cancel=cancel,
                     on_state=row.status,
                     quiet=board.enabled,
+                    progress=row,
                 )
                 row.finish(state)
         except Exception as exc:
@@ -661,6 +796,20 @@ def parser():
         type=int,
         help="simultaneous uploads; config default 3",
     )
+    resume = p.add_mutually_exclusive_group()
+    resume.add_argument(
+        "--resume",
+        dest="resume",
+        action="store_true",
+        help="resume large FLACs using multipart uploads (experimental)",
+    )
+    resume.add_argument(
+        "--no-resume",
+        dest="resume",
+        action="store_false",
+        help="use ordinary whole-file PUTs",
+    )
+    p.set_defaults(resume=None)
     p.add_argument("--retries", type=int, default=10)
     p.add_argument("--retry-sleep", type=int, default=60)
     return p
@@ -866,6 +1015,7 @@ def run_upload(args, directory, project, config):
                     args.force,
                     recovery=load_policy(config.get("recovery", {})),
                     tracker=tracker,
+                    multipart=config["multipart_options"],
                     workers=upload_workers(
                         args.workers
                         if args.workers is not None
@@ -911,6 +1061,26 @@ def main(argv=None):
     config = load_config(args.config)
     if args.workers is not None:
         upload_workers(args.workers)
+    multipart = load_options(config.get("resume", {}))
+    if args.resume is not None:
+        multipart = MultipartOptions(args.resume, multipart.part_size_mib)
+    config["multipart_options"] = multipart
+    if (
+        multipart.enabled
+        and (args.no_log or not config.get("log", True))
+        and not (
+            args.preview
+            or args.list
+            or args.complete is not None
+            or args.session_name
+            or args.runtime
+            or args.metadata
+        )
+    ):
+        raise ValueError(
+            "File resume requires upload logging; enable log and omit "
+            "--no-log, or use --no-resume."
+        )
     if args.collections is not None:
         config["collections"] = {
             **config.get("collections", {}),

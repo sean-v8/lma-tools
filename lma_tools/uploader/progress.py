@@ -25,7 +25,7 @@ class OrderedProgress(_UploadProgress):
 
     @property
     def format_dict(self):
-        values = super().format_dict
+        values = progress_values(self)
         if columns := getattr(self, "columns", None):
             return columns.format(self, values)
         columns = values.get("ncols")
@@ -55,6 +55,15 @@ class OrderedProgress(_UploadProgress):
                     label[:head] + "…" + label[-(width - head - 1) :]
                 )
         return values
+
+
+def progress_values(bar):
+    values = _UploadProgress.format_dict.fget(bar)
+    if getattr(bar, "_resume_offset", 0) and values["rate"] is None:
+        # Stored parts are progress, but were not transmitted in this run.
+        values["rate"] = 0
+        values["upload_rate"] = "0.00 B/s"
+    return values
 
 
 class SharedColumns:
@@ -107,7 +116,7 @@ class SharedColumns:
     def prepare(self, bars):
         if not bars:
             return
-        snapshots = [_UploadProgress.format_dict.fget(bar) for bar in bars]
+        snapshots = [progress_values(bar) for bar in bars]
         for values in snapshots:
             for key, value in self.metrics(values).items():
                 self.widths[key] = max(self.widths.get(key, 0), len(value))
@@ -240,6 +249,16 @@ class ProgressRow:
                 self.bar.set_postfix_str("", refresh=False)
                 self.board._redraw()
 
+    def resume(self, offset):
+        if self.board.tracker is not None:
+            self.board.tracker.resume(self.path.name, offset)
+        with self.board.lock:
+            if self.bar is not None:
+                self.bar.reset()
+                self.bar.n = self.bar.initial = self.bar.last_print_n = offset
+                self.bar._resume_offset = offset
+                self.board._redraw()
+
     def advance(self, size):
         if self.board.tracker is not None:
             self.board.tracker.advance(self.path.name, size)
@@ -291,6 +310,7 @@ class TransferSession(ArchiveSession):
         body = original.body if isinstance(original, UploadBody) else original
         if (
             request.method == "PUT"
+            and not getattr(body, "_lma_multipart", False)
             and (
                 urlsplit(request.url).hostname == "s3.us.archive.org"
                 or isinstance(original, UploadBody)
@@ -326,7 +346,11 @@ def watch_transfer(session, path, tracker):
     def send(request, **kwargs):
         original = request.body
         body = original.body if isinstance(original, UploadBody) else original
-        if request.method == "PUT" and hasattr(body, "read"):
+        if (
+            request.method == "PUT"
+            and hasattr(body, "read")
+            and not getattr(body, "_lma_multipart", False)
+        ):
             observer.begin()
             request.body = UploadBody(body, observer, None)
         try:
