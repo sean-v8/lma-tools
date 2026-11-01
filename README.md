@@ -359,6 +359,8 @@ uv run --locked python -m unittest discover -s tests -t .
 Checks also run on GitHub through
 [GitHub Actions](.github/workflows/checks.yml).
 HTTP behavior is covered with mocks; these checks do not perform live uploads.
+Implementation decisions and validation limits are in
+[Development notes](docs/DEVELOPMENT.md).
 
 ## License
 
