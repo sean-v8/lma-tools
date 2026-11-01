@@ -1,7 +1,7 @@
-# Copy to config.toml, or migrate existing settings as described in README.
 [uploader]
 shows_root = "/path/to/shows"
 log = true
+
 [uploader.recovery]
 retries = 3
 checks = 3
@@ -9,7 +9,8 @@ delay = 30.0
 max_delay = 300.0
 
 [uploader.collections]
-# band = "ArchiveCollection"
+# identifier_prefix = "ArchiveCollection"
+# gd = "GratefulDead"
 
 [views]
 query = ['collection:(etree OR taperssection)']
