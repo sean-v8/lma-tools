@@ -17,6 +17,7 @@ import tomllib
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
+from importlib.metadata import version
 from pathlib import Path
 from threading import RLock
 
@@ -851,6 +852,7 @@ def run_upload(args, directory, project, config):
                 f"Collection identifier for {abbreviation}: "
             ).strip()
         metadata.update(collection=collection or "", runtime=runtime)
+        metadata["scanner"] = f"lma-tools v{version('lma-tools')}"
         if not args.preview:
             identifier, metadata = edit_review(
                 identifier, metadata, history=not bool(previous)

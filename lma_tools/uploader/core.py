@@ -74,6 +74,7 @@ def parse_notes(text, identifier):
     source, lineage = parse_recording_section(lines[4:person_index])
     return dict(
         mediatype="etree",
+        type="sound",
         creator=creator,
         title=f"{creator} Live at {venue} on {show_date}",
         date=show_date,
