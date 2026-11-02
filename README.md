@@ -125,9 +125,10 @@ see [source inference](docs/SOURCE_PARSING.md).
 | Default | Review metadata and runtime | Small files and FLACs |
 | `-m` | Review and update managed fields, including runtime | None |
 | `-r` | Update runtime only | None |
-| `-u` | No metadata or runtime changes | FLACs only |
+| `-u` | No metadata or runtime changes | TXT, JPG, FFP, MD5 and FLAC |
 
-For example, `lmau -u band2026-08-17.audience` uploads only FLACs. Normal and
+For example, `lmau -u band2026-08-17.audience` uploads all supported files
+without changing item metadata. Normal and
 upload-only runs request derivation with each newly uploaded FLAC. A final
 request after all files succeed or are verified and skipped catches any
 remaining work. Small-file PUTs do not request derivation. Archive controls

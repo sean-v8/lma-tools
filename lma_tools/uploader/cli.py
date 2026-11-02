@@ -727,7 +727,7 @@ def parser():
         "-u",
         "--upload",
         action="store_true",
-        help="FLACs only; never calculate or modify runtime",
+        help="upload all supported files; no item metadata or runtime changes",
     )
     modes.add_argument(
         "-r",
@@ -863,13 +863,7 @@ def run_upload(args, directory, project, config):
             journal = Journal(
                 project / f"{identifier}_lma.log", identifier, journal.enabled
             )
-    files = (
-        []
-        if (args.runtime or args.metadata)
-        else flacs
-        if args.upload
-        else small + flacs
-    )
+    files = [] if (args.runtime or args.metadata) else small + flacs
     print(f"Output folder: {directory}\nProject root: {project}")
     print(f"Destination: https://archive.org/details/{identifier}")
     print(review_text(identifier, metadata))

@@ -363,6 +363,8 @@ class TransferTests(unittest.TestCase):
         files = self.files(["one.flac", "two.flac", "three.flac"])
         for path in files:
             (folder / path.name).write_bytes(path.read_bytes())
+        for name in (ID + ".txt", "cover.jpg"):
+            (self.root / name).write_bytes((folder / name).read_bytes())
         config = self.root / "config.toml"
         config.write_text(
             f'[uploader]\nshows_root = "{folder.parent.parent}"\n'
@@ -410,7 +412,7 @@ class TransferTests(unittest.TestCase):
             )
         )
         self.assertEqual(self.run_upload_only(), 0)
-        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(len(self.calls), 5)
         self.assertIn(
             "derivation already queued/running", self.output.getvalue()
         )
@@ -469,7 +471,7 @@ class TransferTests(unittest.TestCase):
 
     def derive(self):
         self.assertEqual(self.active, 0)
-        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(len(self.calls), 5)
         call = self.parent.submit_task.call_args
         return ArchiveSession.submit_task(
             self.parent, *call.args, **call.kwargs

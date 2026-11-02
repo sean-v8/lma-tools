@@ -312,12 +312,18 @@ class RecoveryTests(unittest.TestCase):
         digest, size, _ = cli.file_md5(path)
         config = self.root / "config.toml"
         config.write_text(
-            f'[uploader]\nshows_root = "{self.root}"\n'
+            f'[uploader]\nshows_root = "{self.root}"\nupload_workers = 1\n'
             "[uploader.recovery]\nretries = 1\nchecks = 1\n"
             "delay = 1.0\nmax_delay = 2.0\n"
         )
         item = Mock(identifier=ID, exists=True, files=[])
-        item.upload_file.side_effect = requests.ReadTimeout("lost")
+
+        def send(filename, **kwargs):
+            if filename.endswith(".flac"):
+                raise requests.ReadTimeout("lost")
+            return response()
+
+        item.upload_file.side_effect = send
         self.session.access_key = "test"
         self.session.secret_key = "test"
         self.session.get_item.return_value = item
@@ -332,7 +338,7 @@ class RecoveryTests(unittest.TestCase):
         ):
             self.assertEqual(cli.main(["-u", "--config", str(config), ID]), 0)
         item.modify_metadata.assert_not_called()
-        item.upload_file.assert_called_once()
+        self.assertEqual(item.upload_file.call_count, 3)
         self.assertEqual(item.upload_file.call_args.kwargs["metadata"], {})
         self.session.submit_task.assert_called_once()
 

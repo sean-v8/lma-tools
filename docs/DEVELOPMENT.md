@@ -74,6 +74,9 @@ Direct Tasks API submissions use `derive.php`; `derive` is not a supported
 command name. The per-file upload header is a separate mechanism.
 Metadata-only and runtime-only modes do not queue file derivation. Task
 acceptance does not establish that Archive has finished processing it.
+Upload-only mode selects TXT, JPG, FFP, MD5 and FLAC files. It skips metadata
+review, item metadata writes and runtime calculation; ordinary checksum checks
+and multipart resume still apply. It requires an existing item.
 
 The exact `derive.php already queued/running` application error is accepted
 as an existing pending task. Other errors remain failures and are recorded

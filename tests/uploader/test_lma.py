@@ -354,9 +354,13 @@ class WorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             folder, args = self.setup_show(root)
+            digest = lma.file_md5(folder / "one.flac")[0]
+            (folder / "checks.ffp").write_text(f"one.flac:{digest}\n")
+            (folder / "checks.md5").write_text(f"{digest}  one.flac\n")
             item = Mock(exists=True, identifier=ID, files=[])
             item.upload_file.return_value = response()
             session = Mock(access_key="test", secret_key="test")
+            session.send = Mock()
             session.get_item.return_value = item
             session.submit_task.return_value = response()
             with (
@@ -365,16 +369,31 @@ class WorkflowTests(unittest.TestCase):
                     "audio_runtime",
                     side_effect=AssertionError("runtime forbidden"),
                 ),
+                patch.object(
+                    lma_core,
+                    "FLAC",
+                    return_value=Mock(
+                        info=Mock(md5_signature=int(digest, 16))
+                    ),
+                ),
                 patch.object(lma, "ArchiveSession", return_value=session),
                 patch("builtins.input", return_value="UPLOAD"),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 self.assertEqual(lma.main(args + ["-u"]), 0)
             item.modify_metadata.assert_not_called()
-            self.assertEqual(
+            self.assertCountEqual(
                 [c.kwargs["key"] for c in item.upload_file.call_args_list],
-                ["one.flac"],
+                [
+                    ID + ".txt",
+                    "cover.jpg",
+                    "checks.ffp",
+                    "checks.md5",
+                    "one.flac",
+                ],
             )
+            for call in item.upload_file.call_args_list:
+                self.assertEqual(call.kwargs["metadata"], {})
             self.assertEqual(list(folder.glob("*.log")), [])
             self.assertEqual(len(list(folder.parent.glob("*_lma.log"))), 1)
 
