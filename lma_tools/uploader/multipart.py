@@ -200,7 +200,8 @@ class MultipartUpload:
                             **(headers or {}),
                         },
                         allow_redirects=False,
-                        timeout=(30, 300),
+                        # urllib3 uses connect timeout while writing bodies.
+                        timeout=(300 if method == "PUT" else 30, 300),
                     )
                     try:
                         if method == "GET" and response.status_code in (

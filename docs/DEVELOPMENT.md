@@ -107,6 +107,8 @@ Resume with logging disabled is rejected before network access or review.
 newly accepted item may not yet be available to multipart requests. This
 exception does not restart an existing multipart transfer. XML error responses
 retain HTTP status in the log; failed worker rows also display the message.
+Multipart part PUTs use a 300-second socket timeout for both writes and reads,
+matching ordinary uploads. Control requests retain a 30-second connect timeout.
 
 When supported, server part listings are reconciled against local hashes. If
 listing is unavailable, locally acknowledged parts can be reused, but

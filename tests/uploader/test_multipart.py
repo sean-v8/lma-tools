@@ -126,6 +126,10 @@ class MultipartTests(unittest.TestCase):
             return xml_response("", 404)
         self.assertFalse(kwargs.get("allow_redirects", False))
         self.assertEqual(
+            kwargs["timeout"],
+            (300, 300) if request.method == "PUT" else (30, 300),
+        )
+        self.assertEqual(
             request.headers["Authorization"], "LOW test-access:test-secret"
         )
         query = parse_qs(urlsplit(request.url).query, keep_blank_values=True)
