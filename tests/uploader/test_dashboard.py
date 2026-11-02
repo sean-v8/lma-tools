@@ -17,6 +17,14 @@ from lma_tools.uploader.progress import (
 
 
 class DashboardTests(unittest.TestCase):
+    def test_derive_failure_keeps_completed_upload_in_total(self):
+        job = self.job(1, "derive failed")
+        job.update(sent=100, confirmed=100, completed=5, rate=0)
+        total = dashboard.total_progress([job])
+        self.assertEqual(total["sent"], 100)
+        self.assertEqual(total["completed"], 5)
+        self.assertEqual(total["status"], "derive failed")
+
     def job(self, started, status="uploading", heartbeat=100):
         return {
             "started": started,

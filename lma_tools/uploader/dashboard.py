@@ -51,7 +51,11 @@ class DashboardJobs:
 
 def total_progress(jobs):
     """Sum current work and retained successes, excluding stopped attempts."""
-    included = [job for job in jobs if job["status"] in LIVE | {"done"}]
+    included = [
+        job
+        for job in jobs
+        if job["status"] in LIVE | {"done", "derive failed"}
+    ]
     total = {
         key: sum(job[key] for job in included)
         for key in ("total", "sent", "confirmed", "completed", "files")
@@ -64,6 +68,8 @@ def total_progress(jobs):
         rate=sum(job["rate"] for job in included if job["status"] in LIVE),
         status=f"{running} running"
         if running
+        else "derive failed"
+        if any(job["status"] == "derive failed" for job in included)
         else "done"
         if included
         else "idle",

@@ -156,6 +156,8 @@ class TransferTests(unittest.TestCase):
                 self.assertEqual(self.active, 0)
                 self.task_requests.append(payload)
                 result = response(content=b'{"success":true}')
+                if hasattr(self, "derive_result"):
+                    result = self.derive_result
                 result._content_consumed = True
                 return result
             if request.method == "HEAD":
@@ -397,6 +399,37 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(self.peak, 1)
         self.assertEqual(self.sessions, [])
         self.assertTrue(all(c[1] is self.parent for c in self.calls))
+
+    def test_already_pending_derive_finishes_verified_upload_successfully(
+        self,
+    ):
+        self.derive_result = response(
+            content=(
+                b'{"success":false,"error":'
+                b'"derive.php already queued/running"}'
+            )
+        )
+        self.assertEqual(self.run_upload_only(), 0)
+        self.assertEqual(len(self.calls), 3)
+        self.assertIn(
+            "derivation already queued/running", self.output.getvalue()
+        )
+
+    def test_final_derive_failure_preserves_verified_status_and_error(self):
+        self.derive_result = response(
+            content=(b'{"success":false,"error":"Cannot submit derive task"}')
+        )
+        tracker = Mock()
+        with (
+            patch.dict("os.environ", LMA_UPLOAD_SESSION="test"),
+            patch(
+                "lma_tools.uploader.dashboard.ShowProgress",
+                return_value=tracker,
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "Cannot submit"):
+                self.run_upload_only()
+        tracker.close.assert_called_once_with("derive failed")
 
     def test_failed_parallel_run_skips_final_derive_and_logs_other_successes(
         self,

@@ -37,6 +37,7 @@ from .core import (
     show_identity,
     validate_fingerprints,
 )
+from .derivation import queue_final_derive
 from .multipart import (
     MultipartOptions,
     MultipartUpload,
@@ -900,6 +901,7 @@ def run_upload(args, directory, project, config):
         force=args.force,
     )
     tracker = None
+    files_verified = False
     if files and os.environ.get("LMA_UPLOAD_SESSION"):
         from .dashboard import ShowProgress
 
@@ -1016,26 +1018,27 @@ def run_upload(args, directory, project, config):
                         else config.get("upload_workers", 3)
                     ),
                 )
+                files_verified = True
                 if tracker is not None:
                     tracker.status("deriving")
-                check_response(
-                    session.submit_task(
-                        identifier,
-                        "derive.php",
-                        comment="lma.py: selected uploads complete",
-                        request_kwargs={"timeout": (30, 60)},
-                    )
-                )
-                journal.append("derive_queued")
+                queue_final_derive(session, identifier, journal)
         journal.append("run_ok")
         if tracker is not None:
             tracker.close("done")
     except BaseException as exc:
         if tracker is not None:
             tracker.close(
-                "cancelled" if isinstance(exc, KeyboardInterrupt) else "failed"
+                "cancelled"
+                if isinstance(exc, KeyboardInterrupt)
+                else "derive failed"
+                if files_verified
+                else "failed"
             )
-        data = {"error": type(exc).__name__}
+        data = {
+            "error": type(exc).__name__,
+            "message": str(exc)[:2000],
+            "files_verified": files_verified,
+        }
         if isinstance(exc, HTTPError) and exc.response is not None:
             data.update(
                 status=exc.response.status_code,

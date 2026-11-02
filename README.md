@@ -307,7 +307,11 @@ runs are not restored when a new dashboard opens. A TOTAL row above the shows
 sums bytes, speed and completed-FLAC counts for active runs and retained
 successful runs, so finishing a show does not reset the overall progress.
 Cancelled, failed and stale attempts remain visible but are excluded from the
-total. Stale runs are labelled. Snapshots expire after 24 hours without
+total. An upload whose files all verified but whose final derive request failed
+stays in TOTAL with status `derive failed`. An already queued/running derive is
+accepted without failing the upload. Completed counts verify original uploads,
+not the correctness or completion of playback derivatives.
+Stale runs are labelled. Snapshots expire after 24 hours without
 updates; completed rows already retained in the open dashboard remain visible
 even after their snapshot expires. Closing the dashboard does not stop uploads;
 a later interactive run recreates it. Runs started before this version cannot

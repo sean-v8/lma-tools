@@ -75,6 +75,14 @@ command name. The per-file upload header is a separate mechanism.
 Metadata-only and runtime-only modes do not queue file derivation. Task
 acceptance does not establish that Archive has finished processing it.
 
+The exact `derive.php already queued/running` application error is accepted
+as an existing pending task. Other errors remain failures and are recorded
+with their message. A failure after all selected files verify has dashboard
+status `derive failed`; its verified bytes and file counts remain in TOTAL.
+These requests are item-wide, even when triggered by one file's completion.
+Staging parts can currently be detected by an unrelated item derive; no
+verified file-selection or staging-exclusion mechanism is implemented yet.
+
 ## File resume and the upload log
 
 Resume is enabled by default, with settings under `[uploader.resume]` and
