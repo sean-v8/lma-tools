@@ -438,6 +438,53 @@ class MultipartTests(unittest.TestCase):
         self.assertNotIn("test-secret", errors[0]["detail"])
         self.assertIsNone(self.upload().journal.resume_state(self.path.name))
 
+    def test_new_bucket_delay_retries_initiation_then_uploads_normally(self):
+        self.policy = RecoveryPolicy(2, 1, 0.001, 0.001)
+        attempts = []
+
+        def delayed(request, **kwargs):
+            if (
+                request.method == "POST"
+                and urlsplit(request.url).query == "uploads"
+            ):
+                attempts.append(request)
+                if len(attempts) <= 2:
+                    return self.error("NoSuchBucket")
+            return self.transport(request, **kwargs)
+
+        with patch.object(self.session, "send", side_effect=delayed):
+            self.upload().run()
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(self.next_id, 1)
+        self.assertEqual(self.puts, [1, 2])
+
+    def test_missing_bucket_retries_are_bounded_and_do_not_create_state(self):
+        self.policy = RecoveryPolicy(1, 1, 0.001, 0.001)
+        with patch.object(
+            self.session,
+            "send",
+            side_effect=lambda *a, **k: self.error("NoSuchBucket"),
+        ) as send:
+            with self.assertRaisesRegex(
+                multipart.MultipartError, "NoSuchBucket"
+            ):
+                self.upload().run()
+        self.assertEqual(send.call_count, 2)
+        self.assertIsNone(self.upload().journal.resume_state(self.path.name))
+
+    def test_missing_bucket_after_initiation_is_not_silently_retried(self):
+        self.policy = RecoveryPolicy(2, 1, 0.001, 0.001)
+        with patch.object(
+            self.session,
+            "send",
+            side_effect=lambda *a, **k: self.error("NoSuchBucket"),
+        ) as send:
+            with self.assertRaises(multipart.MultipartError):
+                self.upload().request("GET", {"uploadId": "existing"})
+        self.assertEqual(send.call_count, 1)
+        error = self.upload().journal.events()[-1]
+        self.assertEqual(error["http_status"], 404)
+
     def test_parallel_files_use_separate_ids_and_stream_parts(self):
         from requests.sessions import Session
 

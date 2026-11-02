@@ -40,8 +40,9 @@ def load_options(data):
 
 
 class MultipartError(ValueError):
-    def __init__(self, code, message):
+    def __init__(self, code, message, http_status=None):
         self.code = code
+        self.http_status = http_status
         super().__init__(f"Multipart {code}: {message}")
 
 
@@ -247,7 +248,9 @@ class MultipartUpload:
                             ):
                                 response.raise_for_status()
                             raise MultipartError(
-                                code, xml_text(root, "Message")
+                                code,
+                                xml_text(root, "Message"),
+                                response.status_code,
                             )
                         response.raise_for_status()
                         if not 200 <= response.status_code < 300:
@@ -262,12 +265,20 @@ class MultipartUpload:
             except Exception as exc:
                 transient = retryable(exc) or (
                     isinstance(exc, MultipartError)
-                    and exc.code
-                    in {"SlowDown", "RequestTimeout", "InternalError"}
+                    and (
+                        exc.code
+                        in {"SlowDown", "RequestTimeout", "InternalError"}
+                        or (
+                            operation == "initiate"
+                            and exc.code == "NoSuchBucket"
+                        )
+                    )
                 )
                 status = getattr(
                     getattr(exc, "response", None), "status_code", None
                 )
+                if status is None:
+                    status = getattr(exc, "http_status", None)
                 detail = type(exc).__name__
                 message = " ".join(str(exc).splitlines())
                 for secret in (
@@ -291,7 +302,12 @@ class MultipartUpload:
                 )
                 if not transient or attempt == self.policy.retries:
                     raise
-                self.progress.status("retrying part")
+                self.progress.status(
+                    "waiting for item"
+                    if isinstance(exc, MultipartError)
+                    and exc.code == "NoSuchBucket"
+                    else "retrying part"
+                )
                 self.progress.message(
                     f"Multipart {operation}: {detail}; "
                     f"retry {attempt + 1}/{self.policy.retries}. "

@@ -103,6 +103,10 @@ logs use private permissions. Replay isolates files and upload IDs, ignores
 torn JSON/UTF-8 lines and retains later valid records. A `resume_clear` event
 clears active state after verification without deleting the log's history.
 Resume with logging disabled is rejected before network access or review.
+`NoSuchBucket` during initiation uses the bounded recovery retry budget: a
+newly accepted item may not yet be available to multipart requests. This
+exception does not restart an existing multipart transfer. XML error responses
+retain HTTP status in the log; failed worker rows also display the message.
 
 When supported, server part listings are reconciled against local hashes. If
 listing is unavailable, locally acknowledged parts can be reused, but

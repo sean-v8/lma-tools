@@ -700,7 +700,8 @@ def upload_files(
                 )
                 row.finish(state)
         except Exception as exc:
-            row.message(f"Failed: {type(exc).__name__}")
+            detail = " ".join(str(exc).splitlines())[:300]
+            row.message(f"Failed: {type(exc).__name__}: {detail}")
             raise
         finally:
             row.close()
