@@ -12,8 +12,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from lma_tools.config import config_path
-from lma_tools.uploader import cli, launcher
-from lma_tools.views.config import load_config
+from lma_tools.report.config import load_config
+from lma_tools.upload import cli, launcher
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
@@ -28,8 +28,8 @@ class IntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
             path.write_text(
-                f'[uploader]\nshows_root = "{tmp}"\n'
-                '[views]\nquery = ["collection:demo"]\nsort = "v"\n'
+                f'[upload]\nshows_root = "{tmp}"\n'
+                '[report]\nquery = ["collection:demo"]\nsort = "v"\n'
             )
             with patch.dict(os.environ, LMA_TOOLS_CONFIG=str(path)):
                 self.assertEqual(config_path(), path)
@@ -73,8 +73,8 @@ class IntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="lma tools ") as tmp:
             path = Path(tmp) / "config.toml"
             path.write_text(
-                '[uploader]\nshows_root = "$RECORDINGS"\n'
-                '[views]\nquery = ["$UNEXPORTED_VIEW_VALUE"]\n'
+                '[upload]\nshows_root = "$RECORDINGS"\n'
+                '[report]\nquery = ["$UNEXPORTED_VIEW_VALUE"]\n'
             )
             env = {"PATH": os.environ["PATH"], "RECORDINGS": tmp}
             argv = ["--config", str(path), "band2026-08-17.$literal"]
@@ -149,7 +149,7 @@ class IntegrationTests(unittest.TestCase):
     def test_missing_config_exports(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
-            path.write_text('[uploader]\nshows_root = "$MISSING_EXPORT"\n')
+            path.write_text('[upload]\nshows_root = "$MISSING_EXPORT"\n')
             with patch.dict(os.environ, {"PATH": "/bin"}, clear=True):
                 with self.assertRaisesRegex(ValueError, "MISSING_EXPORT"):
                     launcher.config_names(path)
@@ -157,7 +157,7 @@ class IntegrationTests(unittest.TestCase):
     def test_config_file_defaults_do_not_follow_working_directory(self):
         self.assertEqual(config_path(), ROOT / "config.toml")
         result = subprocess.run(
-            [str(ROOT / ".venv/bin/lmav"), "--help"],
+            [str(ROOT / ".venv/bin/lmar"), "--help"],
             cwd="/tmp",
             capture_output=True,
             text=True,

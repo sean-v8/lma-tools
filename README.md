@@ -4,8 +4,8 @@ Command-line tools for the Internet Archive's Live Music Archive.
 
 | Command | Purpose |
 | --- | --- |
-| `lmau` | Review metadata, upload recordings and resume interrupted uploads |
-| `lmav` | Search recordings and report view counts and runtime |
+| `lma-upload` / `lmau` | Prepare, review, upload and resume recordings |
+| `lma-report` / `lmar` | Search and report view counts and runtime |
 
 ## Installation
 
@@ -36,10 +36,29 @@ cd lma-tools
 bash scripts/install.sh
 ```
 
-The installer uses locked dependencies and creates `lmau`, `lmav` and `ia`
-commands through `uv tool install`. Keep the checkout in place: installation is
-editable. No aliases are required. If the commands are not on PATH, run `uv
-tool update-shell` and open a new terminal.
+The installer uses locked dependencies and creates `lma-upload` / `lmau`,
+`lma-report` / `lmar`, and `ia` commands through `uv tool install`. Keep the
+checkout in place: installation is editable. No aliases are required. If the
+commands are not on PATH, run `uv tool update-shell` and open a new terminal.
+
+## Updating older installations
+
+Run `bash scripts/install.sh` again after updating the source. Reinstalling
+lma-tools replaces its former `lmav` entry point with `lmar`; the installer
+also removes a separately uv-installed legacy lma-views package. Run
+`hash -r` in existing shells to clear cached executable paths.
+
+Old `[uploader]` and `[views]` config headers remain readable without changing
+your private file. To migrate headers to `[upload]` and `[report]` while
+retaining values and comments, run:
+
+```bash
+uv run --locked python scripts/migrate_config.py --upgrade config.toml
+```
+
+The migration keeps an exclusive private backup and never overwrites one.
+Collection preference blocks remain at the end. Conflicting old/new headers
+are rejected instead of silently merging different settings.
 
 ## Configuration
 
@@ -53,15 +72,15 @@ test -e config.toml || cp config.example.toml config.toml
 Edit `config.toml` before uploading. For example:
 
 ```toml
-[uploader]
+[upload]
 shows_root = "/absolute/path/to/recordings"
 log = true
 
-[views]
+[report]
 query = ['collection:(etree OR taperssection)']
 sort = "publicdate"
 
-[uploader.collections.band]
+[upload.collections.band]
 collection = "ArchiveCollection"
 creator = "Example Artist"
 genre = "Rock"
@@ -72,7 +91,7 @@ variables and `~` are supported. Collection mappings associate identifier
 prefixes with Archive collection names; approved mappings are saved here
 without changing unrelated settings or comments. See
 [config.example.toml](config.example.toml) for optional defaults, including
-upload recovery settings. Keep basic uploader and views settings above the
+upload recovery settings. Keep basic upload and report settings above the
 collection tables at the end. Legacy string mappings remain supported. Approved
 Creator preferences avoid repeated naming-history lookups; approved Genre is
 saved by preparation, including `-p`, for an existing mapping.
@@ -85,7 +104,7 @@ Both commands select config independently of the current directory:
 4. For a noneditable installation, `$XDG_CONFIG_HOME/lma-tools/config.toml`
    or `~/.config/lma-tools/config.toml`.
 
-Uploader requires config. Views can use generic defaults if its default file is
+Upload requires config. Report can use generic defaults if its default file is
 absent. An explicitly selected missing file is an error. Keep config,
 credentials, recordings and upload logs out of Git; config is Git-ignored.
 
@@ -95,12 +114,12 @@ Configure Archive credentials before uploading:
 ia configure
 ```
 
-Views does not require an account.
+Report does not require an account.
 
 ## Bash completion
 
-Optional completion for `lmau` provides recording identifiers, command options
-and paths. From the checkout, load it in the current shell:
+Optional completion for `lmau` / `lma-upload` provides recording identifiers,
+command options and paths. From the checkout, load it in the current shell:
 
 ```bash
 source "$(pwd)/shell/completion.bash"
@@ -113,7 +132,7 @@ For future shells, add a source line with the checkout's absolute path to
 source "/absolute/path/to/lma-tools/shell/completion.bash"
 ```
 
-Completion is registered only for `lmau`. The interactive commands in `lmav`
+Completion covers `lmau` and `lma-upload`. Interactive commands in `lmar`
 are entered inside the application and do not need Bash completion.
 
 ## Upload recordings
@@ -177,7 +196,7 @@ safeguards and edge cases.
 `--preview` prints the plan without network access, an editor or writes.
 Metadata review uses Ctrl-S to accept and Ctrl-C to cancel; execution requires
 typing `UPLOAD`. Existing-item metadata is updated before file transfers. When
-no saved Creator or reviewed defaults apply, the uploader checks recent
+no saved Creator or reviewed defaults apply, the upload tool checks recent
 collection naming before the interactive review. It prefers the account email
 from `ia configure`, or matches the transferer name when that email is
 unavailable. Up to three recent personal uploads are checked first, then up to
@@ -204,9 +223,10 @@ in [Preparation](docs/PREPARATION.md).
 
 ### Concurrent uploads
 
-The uploader runs up to three file transfers at a time by default. After a new
-item's first notes TXT is confirmed, remaining small files and FLACs share the
-same bounded pool. Existing-item metadata updates finish before any file
+The upload tool runs up to three file transfers at a time by default. For a
+new item, the first notes TXT is confirmed before remaining small files and
+FLACs share the same bounded pool. Existing-item metadata updates finish before
+any file
 transfer starts. Upload-only mode does not edit metadata or runtime.
 
 Each active file has its own progress bar, byte count and IEC speed. Active
@@ -218,7 +238,7 @@ short retry states occupy the affected row until transfers proceed. One file's
 retry does not restart the others. Redirected output uses ordinary status lines
 without cursor controls.
 
-Set `upload_workers` under `[uploader]` in config.toml, or override per run
+Set `upload_workers` under `[upload]` in config.toml, or override per run
 with `-w` / `--workers`:
 
 ```bash
@@ -257,7 +277,7 @@ approval and tmux session.
 
 Defaults allow three additional recovery rounds or retransmissions, with three
 checks per uncertain round and exponential waits from 30 to 300 seconds.
-Settings are under `[uploader.recovery]`; `retries = 0` disables recovery. CLI
+Settings are under `[upload.recovery]`; `retries = 0` disables recovery. CLI
 `--retries` and `--retry-sleep` separately control the upload library's 503
 retries. Authentication errors, certificate errors, local file changes and
 Ctrl-C stop the run. Metadata edits and the final derive request do not use
@@ -274,7 +294,7 @@ lmau -uw 8 band2026-08-17.audience
 Defaults in the shared config:
 
 ```toml
-[uploader.resume]
+[upload.resume]
 enabled = true
 part_size_mib = 16
 ```
@@ -294,19 +314,20 @@ upload threads and files use private permissions. API credentials are never
 stored in the log.
 
 Keep the log to resume after stopping, restarting or disconnecting. A changed
-file or target cannot reuse an old checkpoint. The uploader checks the original
+file or target cannot reuse an old checkpoint. The upload tool checks the
+original
 file's full MD5 on every run. Multipart resume requires logging: use `log =
 true` and omit `--no-log`, or select `--no-resume` for ordinary PUTs.
 
 The existing worker limit still applies across files; parts within a file are
 serial, so enabling resume does not multiply network concurrency. On resume,
-the uploader compares local part hashes with Archive's part listing when
+the upload tool compares local part hashes with Archive's part listing when
 supported. If listing is unavailable, locally acknowledged parts are reused;
 completion must validate the part MD5s and the final remote size and whole-file
 MD5 must match before the file is counted as complete. A missing part
 acknowledgement can cost one part again, rather than the whole file.
 
-Recovery uses `[uploader.recovery]` for part-request retry budgets and waits.
+Recovery uses `[upload.recovery]` for part-request retry budgets and waits.
 Completion verification still runs when `retries = 0`. Multipart completion
 requests derivation for that FLAC. Assembly is asynchronous, so a 100% bar can
 say `assembling` while the file is not yet visible. An uncertain completion
@@ -364,15 +385,15 @@ recreates it. Runs started before this version cannot report their progress. An
 existing session named `lmau` is left untouched.
 
 Listing, help, completion, previews and noninteractive runs execute directly.
-`LMA_NO_TMUX=1` bypasses tmux. Exported variables referenced by uploader config
+`LMA_NO_TMUX=1` bypasses tmux. Exported variables referenced by upload config
 are forwarded into new sessions.
 
-## Search recordings
+## Report on recordings
 
 ```bash
-lmav
-lmav 'collection:etree AND year:2025' --once
-lmav 'collection:etree' --sort views --reverse --json
+lmar
+lmar 'collection:etree AND year:2025' --once
+lmar 'collection:etree' --sort views --reverse --json
 ```
 
 Positional query clauses replace configured clauses and are joined with AND.

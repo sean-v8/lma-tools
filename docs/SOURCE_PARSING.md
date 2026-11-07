@@ -116,7 +116,7 @@ use helps. Ambiguous sources are preserved instead of hidden. A section without
 an identifiable source or final processing chain stops with an explanatory
 error.
 
-`lma_tools/uploader/notes.py` contains the policy and parsing helpers.
+`lma_tools/upload/notes.py` contains the policy and parsing helpers.
 `ROOM_HINTS`, `SPOT_HINTS` and the route-rendering functions are the places to
 adjust future conventions. Tests cover the layouts above, mixed recorder types,
 unknown sources, inline routes and multiline processing.

@@ -16,8 +16,10 @@ dependencies = [
 ]
 
 [project.scripts]
-lmau = "lma_tools.uploader.launcher:main"
-lmav = "lma_tools.views.cli:main"
+lma-upload = "lma_tools.upload.launcher:main"
+lmau = "lma_tools.upload.launcher:main"
+lma-report = "lma_tools.report.cli:main"
+lmar = "lma_tools.report.cli:main"
 
 [build-system]
 requires = ["hatchling"]

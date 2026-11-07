@@ -22,7 +22,7 @@ _lma_complete() {
         command lmau "${config_args[@]}" --complete "$current" 2>/dev/null
     )
 }
-complete -F _lma_complete lmau
+complete -F _lma_complete lmau lma-upload
 
 # Register for an existing tmux attachment shortcut using complete -F.
 _lma_tmux_sessions() {

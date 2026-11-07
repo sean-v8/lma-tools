@@ -10,15 +10,15 @@ The official Archive client release is pinned in `pyproject.toml` and
 Archive progress class or fork is required. Both sequential and concurrent
 uploads use transport-read tracking with the client's own bars disabled.
 Inspect and test request construction before changing the pin. Multipart resume
-uses the existing HTTP dependencies, rather than a separate uploader package.
+uses the existing HTTP dependencies, rather than a separate upload package.
 
 Config discovery is independent of the working directory: explicit config, the
 environment override, the editable checkout, then the XDG location. Private
 config, credentials, recordings and logs must stay out of Git.
 
-Named preference tables live in `[uploader.collections.PREFIX]`, with
+Named preference tables live in `[upload.collections.PREFIX]`, with
 `collection`, optional `creator` and optional `genre`. Legacy strings work.
-Collection tables are saved after basic uploader and views settings. The TOML
+Collection tables are saved after basic upload and report settings. The TOML
 writer keeps comments and unrelated settings, locks the config directory and
 replaces the file atomically. Tests cover concurrent writers and failed
 replacements.
@@ -103,7 +103,7 @@ is implemented.
 
 ## File resume and the upload log
 
-Resume is enabled by default, with settings under `[uploader.resume]` and
+Resume is enabled by default, with settings under `[upload.resume]` and
 `--no-resume` as the command-line opt-out. It streams bounded parts directly
 from the original FLAC, serially within each file's worker slot. The default
 part size is 16 MiB. Small FLACs that fit in one part and non-FLAC files retain
@@ -217,3 +217,11 @@ stdout/stderr is buffered; only failure tracebacks and their captured output
 are shown. Skipped and expected-failure tests are identified separately. The
 runner returns nonzero for failures, errors or unexpected successes. Standard
 `unittest discover` remains available for debugging individual tests.
+
+The upload/report modules are `lma_tools.upload` and `lma_tools.report`.
+Installed commands are `lma-upload`/`lmau` and `lma-report`/`lmar`. Legacy
+config headers are resolved read-only by the shared config layer. Explicit
+migration
+renames those tables with comment-preserving TOML and retains a private backup.
+The install script removes former uv-managed report entry points only after
+successful installation; it does not remove arbitrary PATH executables.

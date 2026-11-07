@@ -162,7 +162,7 @@ make valid remote tracks look obsolete, so inspect every selection carefully.
 For normal uploads with selected cleanup, corrected files upload first and must
 all pass remote whole-file MD5/size checks before deletion starts. Per-file
 derivation is deferred until cleanup completes. Immediately before each delete,
-the uploader rechecks original status, MD5 and size. Changed remote evidence
+the upload tool rechecks original status, MD5 and size. Changed remote evidence
 stops cleanup. Deletes use conditional requests with cascade and automatic
 derive disabled. Bounded metadata/HEAD polling must confirm absence before the
 final item derive. Accepted does not mean finalized: if deletion remains
@@ -202,7 +202,7 @@ them to include these checks.
 Each preparation worker handles one whole track: conversion when needed,
 tagging and decoded-PCM verification. The default is one worker per available
 logical CPU, capped by the number of tracks. Set `prepare_workers = 16` under
-`[uploader]` in private `config.toml` to use a fixed limit. This is independent
+`[upload]` in private `config.toml` to use a fixed limit. This is independent
 of `upload_workers`; set it to `1` for sequential preparation.
 
 All tracks are staged and verified before any output is committed or WAV is
@@ -227,4 +227,4 @@ repairs and final success/failure to the same project-root
 only `prepare_complete` records successful completion. These events never
 serve as upload acknowledgements or bypass remote checksums. Progress redraws
 are not logged. Preview and review cancellation create no journal entries.
-`--no-log` and `[uploader] log = false` disable preparation logging too.
+`--no-log` and `[upload] log = false` disable preparation logging too.

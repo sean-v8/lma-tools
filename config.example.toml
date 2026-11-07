@@ -1,4 +1,4 @@
-[uploader]
+[upload]
 shows_root = "/path/to/shows"
 log = true
 upload_workers = 3
@@ -6,17 +6,17 @@ upload_workers = 3
 # Uncomment to limit simultaneous conversion/tagging jobs on this machine.
 # prepare_workers = 16
 
-[uploader.resume]
+[upload.resume]
 enabled = true
 part_size_mib = 16
 
-[uploader.recovery]
+[upload.recovery]
 retries = 3
 checks = 3
 delay = 30.0
 max_delay = 300.0
 
-[views]
+[report]
 query = ['collection:(etree OR taperssection)']
 sort = "publicdate"
 reverse = false
@@ -24,12 +24,12 @@ timeout = 30.0
 view_batch_size = 100
 exclude_zero_views = true
 
-# Keep per-collection preferences after all basic uploader/views settings.
+# Keep per-collection preferences after all basic upload/report settings.
 # Replace this generic prefix and values with your approved preferences.
-[uploader.collections.band]
+[upload.collections.band]
 collection = "ArchiveCollection"
 creator = "Example Artist"
 genre = "Rock"
 
-# Legacy strings under [uploader.collections] are also supported:
+# Legacy strings under [upload.collections] are also supported:
 # band = "ArchiveCollection"
