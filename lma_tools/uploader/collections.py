@@ -10,16 +10,39 @@ from pathlib import Path
 import tomlkit
 
 
-def validate(values):
-    if not isinstance(values, dict) or any(
-        not isinstance(key, str)
-        or not key.strip()
-        or not isinstance(value, str)
-        or not value.strip()
-        for key, value in values.items()
+def preference(value):
+    """Normalize legacy names and named per-prefix preferences."""
+    if isinstance(value, str) and value.strip():
+        return {"collection": value}
+    if not isinstance(value, dict) or set(value) - {
+        "collection",
+        "creator",
+        "genre",
+    }:
+        raise ValueError("Invalid collection preference")
+    collection = value.get("collection")
+    if (
+        not isinstance(collection, str)
+        or not collection.strip()
+        or any(not isinstance(v, str) for v in value.values())
     ):
+        raise ValueError("Collection is required; preferences need text")
+    return {k: v for k, v in value.items() if v.strip()}
+
+
+def validate(values):
+    if not isinstance(values, dict):
         raise ValueError("uploader.collections must map prefixes to names")
+    for key, value in values.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("Collection prefixes must be nonempty text")
+        preference(value)
     return values
+
+
+def get_preference(config, prefix):
+    value = config.get("collections", {}).get(prefix)
+    return preference(value) if value is not None else {}
 
 
 def load_csv(path):
@@ -56,7 +79,7 @@ def replace_text(path, text):
             os.unlink(temporary)
 
 
-def save_collection(path, abbreviation, collection):
+def save_collection(path, abbreviation, collection, creator=None, genre=None):
     """Read fresh under a directory lock, retaining other tools' settings."""
     path = Path(path).resolve()
     descriptor = os.open(path.parent, os.O_RDONLY)
@@ -72,11 +95,45 @@ def save_collection(path, abbreviation, collection):
             section["collections"] = tomlkit.table()
         values = section["collections"]
         validate(values)
-        if values.get(abbreviation) == collection:
-            return
-        values[abbreviation] = collection
-        text = tomlkit.dumps(document)
+        existing = values.get(abbreviation)
+        if creator is None and genre is None:
+            updated = collection
+            if isinstance(existing, dict):
+                updated = {**existing, "collection": collection}
+        else:
+            updated = preference(existing) if existing is not None else {}
+            updated["collection"] = collection
+            if creator:
+                updated["creator"] = creator
+            if genre is not None:
+                if genre.strip():
+                    updated["genre"] = genre.strip()
+                else:
+                    updated.pop("genre", None)
+        if existing != updated:
+            if isinstance(updated, dict):
+                table = tomlkit.table()
+                table.update(updated)
+                comment = getattr(
+                    getattr(existing, "trivia", None), "comment", ""
+                )
+                if comment:
+                    table.comment(comment.lstrip("# "))
+                values[abbreviation] = table
+            else:
+                values[abbreviation] = updated
+        # Keep every collection block after ordinary uploader/views settings.
+        del section["collections"]
+        text = tomlkit.dumps(document).rstrip() + "\n\n"
+        tail = tomlkit.document()
+        if section is document:
+            tail["collections"] = values
+        else:
+            tail["uploader"] = tomlkit.table(is_super_table=True)
+            tail["uploader"]["collections"] = values
+        text += tomlkit.dumps(tail)
         tomlkit.parse(text)
-        replace_text(path, text)
+        if text != path.read_text(encoding="utf-8"):
+            replace_text(path, text)
     finally:
         os.close(descriptor)

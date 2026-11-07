@@ -9,8 +9,16 @@ Command-line tools for the Internet Archive's Live Music Archive.
 
 ## Installation
 
-Requirements: Linux, Bash and uv. Interactive uploads also require tmux
-(`sudo apt install tmux` on Debian/Ubuntu). The installer uses Python 3.12.
+Requirements: Linux, Bash and uv. Interactive uploads require tmux. Local
+preparation requires the OS tools `flac` and `ffmpeg` (including `ffprobe`),
+available on PATH. On Debian/Ubuntu:
+
+```bash
+sudo apt install flac ffmpeg
+sudo apt install tmux
+```
+
+The installer uses Python 3.12; uv does not install these OS dependencies.
 
 Install uv if it is not already available:
 
@@ -29,9 +37,9 @@ bash scripts/install.sh
 ```
 
 The installer uses locked dependencies and creates `lmau`, `lmav` and `ia`
-commands through `uv tool install`. Keep the checkout in place: installation
-is editable. No aliases are required. If the commands are not on PATH, run
-`uv tool update-shell` and open a new terminal.
+commands through `uv tool install`. Keep the checkout in place: installation is
+editable. No aliases are required. If the commands are not on PATH, run `uv
+tool update-shell` and open a new terminal.
 
 ## Configuration
 
@@ -49,12 +57,14 @@ Edit `config.toml` before uploading. For example:
 shows_root = "/absolute/path/to/recordings"
 log = true
 
-[uploader.collections]
-band = "ArchiveCollection"
-
 [views]
 query = ['collection:(etree OR taperssection)']
 sort = "publicdate"
+
+[uploader.collections.band]
+collection = "ArchiveCollection"
+creator = "Example Artist"
+genre = "Rock"
 ```
 
 `shows_root` must be an existing absolute directory. Exported environment
@@ -62,7 +72,10 @@ variables and `~` are supported. Collection mappings associate identifier
 prefixes with Archive collection names; approved mappings are saved here
 without changing unrelated settings or comments. See
 [config.example.toml](config.example.toml) for optional defaults, including
-upload recovery settings.
+upload recovery settings. Keep basic uploader and views settings above the
+collection tables at the end. Legacy string mappings remain supported. Approved
+Creator preferences avoid repeated naming-history lookups; approved Genre is
+saved by preparation, including `-p`, for an existing mapping.
 
 Both commands select config independently of the current directory:
 
@@ -72,8 +85,8 @@ Both commands select config independently of the current directory:
 4. For a noneditable installation, `$XDG_CONFIG_HOME/lma-tools/config.toml`
    or `~/.config/lma-tools/config.toml`.
 
-Uploader requires config. Views can use generic defaults if its default file
-is absent. An explicitly selected missing file is an error. Keep config,
+Uploader requires config. Views can use generic defaults if its default file is
+absent. An explicitly selected missing file is an error. Keep config,
 credentials, recordings and upload logs out of Git; config is Git-ignored.
 
 Configure Archive credentials before uploading:
@@ -111,67 +124,97 @@ lmau band2026-08-17.audience --preview
 lmau band2026-08-17.audience
 ```
 
-A recording output folder needs a band/date-style identifier, TXT notes and
-FLAC audio. Discovery checks project directories under `shows_root` and their
-immediate output directories. Explicit output paths also work. From inside
-an output folder, the identifier can be omitted.
+A recording output folder needs a band/date-style identifier, TXT notes and WAV
+or FLAC audio. Discovery checks project directories under `shows_root` and
+their immediate output directories. Explicit output paths also work. From
+inside an output folder, the identifier can be omitted.
 
-Notes begin with artist, date, venue and city, followed by recording notes
-and a `Name <email>` credit. Source and lineage suggestions remain editable;
-see [source inference](docs/SOURCE_PARSING.md).
+Notes begin with artist, date, venue and city, followed by recording notes and
+a `Name <email>` credit. Source and lineage suggestions remain editable; see
+[source inference](docs/SOURCE_PARSING.md).
 
-| Mode | Metadata | File transfers |
+| Mode | Local preparation | Archive action |
 | --- | --- | --- |
-| Default | Review metadata and runtime | Small files and FLACs |
-| `-m` | Review and update managed fields, including runtime | None |
-| `-r` | Update runtime only | None |
-| `-u` | No metadata or runtime changes | TXT, JPG, FFP, MD5 and FLAC |
+| Default | Review and apply audio plan | Metadata, uploads, cleanup review |
+| `-p` / `--prepare` | Review and apply audio plan | None |
+| `--clean` | None | Cleanup only; existing item |
+| `-m` | None | Review and update managed metadata and runtime |
+| `-r` | None | Runtime only |
+| `-u` | None | Upload existing TXT, JPG, FFP, MD5 and FLAC files |
 
-For example, `lmau -u band2026-08-17.audience` uploads all supported files
-without changing item metadata. Normal and
-upload-only runs request derivation with each newly uploaded FLAC. A final
-request after all files succeed or are verified and skipped catches any
-remaining work. Small-file PUTs do not request derivation. Archive controls
-when queued tasks run; upload completion does not mean derivation is done.
+Normal runs first match WAV/FLAC names and title tags to the notes setlist.
+Review the editable TOML plan; Ctrl-S approves local changes. Preparation can
+rename and retag audio, encode WAVs and rebuild manifests. Successful WAVs are
+removed only after decoded PCM verification. This approval is separate from the
+later `UPLOAD` approval: cancelling upload retains preparation. Use `-p` for
+local preparation without Archive access.
+
+Avoid normal preparation on partial folders. Use `-u` for existing files in an
+existing item: it does not edit audio, item metadata or runtime. Manifest
+validation and repair integration is described in
+[Preparation](docs/PREPARATION.md), including explicit repair approval.
+Metadata-only and runtime-only modes also bypass preparation.
+
+Normal uploads review remote original extras with nothing selected by default.
+Select numbers or `all`, then type `DELETE` to approve deletion. Use
+`--no-clean` to omit that review, or standalone `--clean` for cleanup without
+preparation, audio changes, file uploads or item metadata mutation. Conflicting
+files offer replace (`r`), replace all conflicts (`a`) or cancel (`c`).
+Matching files still skip after `a`. `--force` retains its legacy upload-all
+behavior, including matching files.
+
+Corrected uploads must be remotely checksum-verified before approved extras are
+deleted. Deletes do not cascade. Accepted deletion is not finalized; bounded
+metadata/HEAD checks must confirm absence before final derivation. If still
+pending, the run retains the accepted-deletion log and exits; rerun cleanup
+later. When cleanup is selected, per-file derivation waits until cleanup
+finishes; a final derive request follows. Otherwise each new FLAC requests
+derivation, followed by a final request. Small-file PUTs do not request
+derivation. Archive controls task timing; upload completion does not mean
+derivation is done. See [Preparation](docs/PREPARATION.md) for cleanup
+safeguards and edge cases.
 
 `--preview` prints the plan without network access, an editor or writes.
 Metadata review uses Ctrl-S to accept and Ctrl-C to cancel; execution requires
-typing `UPLOAD`. Existing-item metadata is updated before file transfers.
-Before the interactive review, the uploader checks recent collection naming.
-It prefers the account email from `ia configure`, or matches the transferer
-name when that email is unavailable. Up to three recent personal uploads are
-checked first, then up to three other uploads if needed. A majority of at
-least two matching Creator/Title patterns seeds those fields with this show's
-venue and date. Conflicts, unfamiliar title formats and failed lookups leave
-local naming in place. A comment in the editor identifies the suggestion.
-Saved reviews take precedence; `--fresh-metadata` starts a fresh review.
-Existing items use their current Creator/Title when starting a fresh review.
-The offline `--preview` command does not perform this lookup.
+typing `UPLOAD`. Existing-item metadata is updated before file transfers. When
+no saved Creator or reviewed defaults apply, the uploader checks recent
+collection naming before the interactive review. It prefers the account email
+from `ia configure`, or matches the transferer name when that email is
+unavailable. Up to three recent personal uploads are checked first, then up to
+three other uploads if needed. A majority of at least two matching
+Creator/Title patterns seeds those fields with this show's venue and date.
+Conflicts, unfamiliar title formats and failed lookups leave local naming in
+place. A comment in the editor identifies the suggestion. Saved reviews take
+precedence; `--fresh-metadata` starts a fresh review. Without a saved Creator,
+existing items seed a fresh review with their current Creator/Title. The
+offline `--preview` command does not perform this lookup.
 
 `-m` permits reviewed Creator and Title corrections with server-side checks
 against concurrent changes. Normal upload/resume runs still protect those
 fields. Identifier, Collection and Mediatype remain protected on existing
 items; Archive may impose additional restrictions. Descriptions are sent as
-escaped plain text so angle-bracket email credits remain visible.
-Show files are never changed, moved or deleted.
+escaped plain text so angle-bracket email credits remain visible. Local changes
+occur only in the approved preparation stage.
 
 Only direct TXT/JPG/MD5/FFP/FLAC files are eligible. Runtime is summed from
 exact FLAC sample counts and rounded once. Full, metadata and runtime modes
-require the complete local FLAC inventory. FFP inventories and embedded
-fingerprints are checked; MD5 manifests are uploaded as supplied.
+require the complete local FLAC inventory. Preparation rebuilds FFP and MD5
+manifests; bypass modes use existing files. See the manifest validation limits
+in [Preparation](docs/PREPARATION.md).
 
 ### Concurrent uploads
 
-The uploader runs up to three file transfers at a time by default. After a
-new item's first notes TXT is confirmed, remaining small files and FLACs
-share the same bounded pool. Existing-item metadata updates finish before
-any file transfer starts. Upload-only mode does not edit metadata or runtime.
+The uploader runs up to three file transfers at a time by default. After a new
+item's first notes TXT is confirmed, remaining small files and FLACs share the
+same bounded pool. Existing-item metadata updates finish before any file
+transfer starts. Upload-only mode does not edit metadata or runtime.
 
 Each active file has its own progress bar, byte count and IEC speed. Active
 rows stay in file order; completed rows disappear and the remaining rows close
 the gap. Shared label, bar and metric columns keep all rows aligned. Long
 filenames shorten to keep speeds visible. Routine start/finish messages are
-suppressed in this display. Recovery messages identify the file; one file's
+suppressed in this display. Multipart retry details stay in the journal;
+short retry states occupy the affected row until transfers proceed. One file's
 retry does not restart the others. Redirected output uses ordinary status lines
 without cursor controls.
 
@@ -190,34 +233,35 @@ more transfers. A few workers are easier to monitor than every track at once.
 A failed file stops new files from starting. Already-active transfers finish
 and record their outcomes; derivation is queued only when all selected files
 succeed. Ctrl-C stops scheduling, interrupts recovery waits and cancels body
-reads. Requests awaiting a server reply or a library backoff may need to
-return or reach their timeout before the run exits. Resume with the same
-command to check and skip completed files.
+reads. Requests awaiting a server reply or a library backoff may need to return
+or reach their timeout before the run exits. Resume with the same command to
+check and skip completed files.
 
 ### Resume and recovery
 
 Matching remote whole-file MD5 and size skip completed files. A conflicting
-checksum stops the run unless `--force` explicitly permits replacement.
-Append-only `IDENTIFIER_lma.log` files in the project directory record
-approved metadata, transfer outcomes and recovery history. `--no-log` or
-`log = false` disables logging and log-based reuse; remote verification still
-works. `--fresh-metadata` reparses notes instead of reusing reviewed defaults.
+checksum requires replacement approval before transfers begin. Append-only
+`IDENTIFIER_lma.log` files in the project directory record approved metadata,
+preparation settings, verified staging, final preparation outcomes, transfer
+outcomes and recovery history. `--no-log` or `log = false` disables
+logging and log-based reuse; remote verification still works. `--fresh-
+metadata` reparses notes instead of reusing reviewed defaults.
 
 After a timeout or dropped connection, bounded recovery waits and verifies
 remote MD5 and size before resending. A confirmed complete file advances to the
 next file automatically. Confirmed absence permits retransmission; unknown
 remote state triggers more checks without resending. A 100% progress bar alone
-is not confirmation. Ordinary PUTs restart incomplete files in full. Opt-in
+is not confirmation. Ordinary PUTs restart incomplete files in full. Default
 multipart uploads resume acknowledged parts. Recovery uses the existing
 approval and tmux session.
 
-Defaults allow three additional recovery rounds or retransmissions, with
-three checks per uncertain round and exponential waits from 30 to 300 seconds.
-Settings are under `[uploader.recovery]`; `retries = 0` disables recovery.
-CLI `--retries` and `--retry-sleep` separately control the upload library's
-503 retries. Authentication errors, certificate errors, local file changes
-and Ctrl-C stop the run. Metadata edits and the final derive request do not
-use this upload recovery loop.
+Defaults allow three additional recovery rounds or retransmissions, with three
+checks per uncertain round and exponential waits from 30 to 300 seconds.
+Settings are under `[uploader.recovery]`; `retries = 0` disables recovery. CLI
+`--retries` and `--retry-sleep` separately control the upload library's 503
+retries. Authentication errors, certificate errors, local file changes and
+Ctrl-C stop the run. Metadata edits and the final derive request do not use
+this upload recovery loop.
 
 ### Resuming large FLACs
 
@@ -251,8 +295,8 @@ stored in the log.
 
 Keep the log to resume after stopping, restarting or disconnecting. A changed
 file or target cannot reuse an old checkpoint. The uploader checks the original
-file's full MD5 on every run. Multipart resume requires logging: use
-`log = true` and omit `--no-log`, or select `--no-resume` for ordinary PUTs.
+file's full MD5 on every run. Multipart resume requires logging: use `log =
+true` and omit `--no-log`, or select `--no-resume` for ordinary PUTs.
 
 The existing worker limit still applies across files; parts within a file are
 serial, so enabling resume does not multiply network concurrency. On resume,
@@ -270,11 +314,12 @@ retains the checkpoint and does not start a new upload ID; rerunning checks
 assembly instead of resending the whole file. After multipart assembly is
 verified, a log event clears its active checkpoint; the history is retained.
 
-Existing plain PUT transfers cannot be converted into multipart resumes.
-Interrupted parts have been recovered in live testing. Full-file assembly and
-derivation still need end-to-end live verification. The protocol reference is
-[ia-multipart](https://github.com/internetarchivecanada/ia-multipart); this
-package implements its own backend using the existing dependencies.
+Existing plain PUT transfers cannot be converted into multipart resumes. Users
+report successful end-to-end Archive uploads, including multipart assembly. Our
+automated network tests use mocks; they do not independently verify live
+assembly or derivation. The protocol reference is [ia-
+multipart](https://github.com/internetarchivecanada/ia-multipart); this package
+implements its own backend using the existing dependencies.
 
 ### tmux sessions
 
@@ -289,34 +334,34 @@ with `tmux attach -t lmau`. Inside tmux, use `tmux switch-client -t lmau`. Each
 show has a compact aggregate byte/rate bar and a count of completed FLACs.
 Elapsed time covers the current run. Remaining transfer time uses a smoothed
 rate over roughly 30 seconds, excluding previously uploaded bytes from speed.
-It estimates transfer time only; server acknowledgement and derivation can
-take longer. Normal transfers omit a status label; other states stay visible.
-Labels align to the longest visible identifier, and every row shares the same
-bar and metric widths. The byte total covers selected files. The file counter
-always covers all FLACs in the show folder, including verified skips;
-TXT/JPG/MD5/FFP files never count toward it. Verified skips count immediately
-when checked. Sent bytes include in-flight data, so 100% may still await
-acknowledgement or derivation submission. Retries reset that file's in-flight
-count; interrupted runs retain confirmed files and checkpointed multipart
-bytes. These counters never authorize a skip; multipart checkpoints and remote
-verification control resume.
+It estimates transfer time only; server acknowledgement and derivation can take
+longer. Normal transfers omit a status label; other states stay visible. Labels
+align to the longest visible identifier, and every row shares the same bar and
+metric widths. The byte total covers selected files. The file counter always
+covers all FLACs in the show folder, including verified skips; TXT/JPG/MD5/FFP
+files never count toward it. Verified skips count immediately when checked.
+Sent bytes include in-flight data, so 100% may still await acknowledgement or
+derivation submission. Retries reset that file's in-flight count; interrupted
+runs retain confirmed files and checkpointed multipart bytes. These counters
+never authorize a skip; multipart checkpoints and remote verification control
+resume.
 
-Progress snapshots are private local state under
-`$XDG_STATE_HOME/lma-tools/uploads`, or `~/.local/state/lma-tools/uploads`. The
-display retains every run it observes until that dashboard closes. Old finished
-runs are not restored when a new dashboard opens. A TOTAL row above the shows
-sums bytes, speed and completed-FLAC counts for active runs and retained
-successful runs, so finishing a show does not reset the overall progress.
-Cancelled, failed and stale attempts remain visible but are excluded from the
-total. An upload whose files all verified but whose final derive request failed
-stays in TOTAL with status `derive failed`. An already queued/running derive is
-accepted without failing the upload. Completed counts verify original uploads,
-not the correctness or completion of playback derivatives.
-Stale runs are labelled. Snapshots expire after 24 hours without
-updates; completed rows already retained in the open dashboard remain visible
-even after their snapshot expires. Closing the dashboard does not stop uploads;
-a later interactive run recreates it. Runs started before this version cannot
-report their progress. An existing session named `lmau` is left untouched.
+Progress snapshots are private local state under `$XDG_STATE_HOME/lma-
+tools/uploads`, or `~/.local/state/lma-tools/uploads`. The display retains
+every run it observes until that dashboard closes. Old finished runs are not
+restored when a new dashboard opens. A TOTAL row above the shows sums bytes,
+speed and completed-FLAC counts for active runs and retained successful runs,
+so finishing a show does not reset the overall progress. Cancelled, failed and
+stale attempts remain visible but are excluded from the total. An upload whose
+files all verified but whose final derive request failed stays in TOTAL with
+status `derive failed`. An already queued/running derive is accepted without
+failing the upload. Completed counts verify original uploads, not the
+correctness or completion of playback derivatives. Stale runs are labelled.
+Snapshots expire after 24 hours without updates; completed rows already
+retained in the open dashboard remain visible even after their snapshot
+expires. Closing the dashboard does not stop uploads; a later interactive run
+recreates it. Runs started before this version cannot report their progress. An
+existing session named `lmau` is left untouched.
 
 Listing, help, completion, previews and noninteractive runs execute directly.
 `LMA_NO_TMUX=1` bypasses tmux. Exported variables referenced by uploader config
@@ -333,19 +378,19 @@ lmav 'collection:etree' --sort views --reverse --json
 Positional query clauses replace configured clauses and are joined with AND.
 Quote complete expressions and narrow the generic collection query before
 submitting it. The interactive menu supports field filters, sorting, query
-editing and favorites. Enter runs a report; `q` quits. `cache` toggles reuse
-of search results, `reload` refreshes caches, and `debug` toggles in-memory
+editing and favorites. Enter runs a report; `q` quits. `cache` toggles reuse of
+search results, `reload` refreshes caches, and `debug` toggles in-memory
 request timings. Successful view counts remain cached until reload or exit.
 
 Views are lifetime counts, not unique listeners. Daily means lifetime views
-divided by days since publicdate, with a one-day minimum. Unknown counts
-remain unknown; totals use successful counts. Zero counts are excluded from
-averages by default. Malformed runtime is excluded from runtime statistics.
-Show and performance counts use metadata grouping heuristics.
+divided by days since publicdate, with a one-day minimum. Unknown counts remain
+unknown; totals use successful counts. Zero counts are excluded from averages
+by default. Malformed runtime is excluded from runtime statistics. Show and
+performance counts use metadata grouping heuristics.
 
-JSON goes to stdout and warnings to stderr. Exit status 1 indicates an error
-or incomplete view data; 130 indicates interruption. Views performs no
-Archive write operations.
+JSON goes to stdout and warnings to stderr. Exit status 1 indicates an error or
+incomplete view data; 130 indicates interruption. Views performs no Archive
+write operations.
 
 ## Updates and checks
 
@@ -361,14 +406,13 @@ To run the offline test suite and style checks:
 uv sync --locked
 uv run --locked ruff format --check .
 uv run --locked ruff check .
-uv run --locked python -m unittest discover -s tests -t .
+uv run --locked python -B -m tests
 ```
 
-Checks also run on GitHub through
-[GitHub Actions](.github/workflows/checks.yml).
-HTTP behavior is covered with mocks; these checks do not perform live uploads.
-Implementation decisions and validation limits are in
-[Development notes](docs/DEVELOPMENT.md).
+Checks also run on GitHub through [GitHub
+Actions](.github/workflows/checks.yml). HTTP behavior is covered with mocks;
+these checks do not perform live uploads. Implementation decisions and
+validation limits are in [Development notes](docs/DEVELOPMENT.md).
 
 ## License
 

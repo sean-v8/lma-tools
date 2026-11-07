@@ -72,6 +72,8 @@ def ensure_dashboard():
 
 def launch(argv):
     args = cli.parser().parse_args(argv)
+    if args.prepare:
+        return cli.main(argv)
     direct = (
         args.preview
         or args.list

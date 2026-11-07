@@ -1,7 +1,7 @@
 # Development notes
 
-Implementation decisions, invariants and validation limits for lma-tools.
-User-facing setup and commands belong in the [README](../README.md).
+Implementation decisions, invariants and validation limits for lma-tools. User-
+facing setup and commands belong in the [README](../README.md).
 
 ## Dependencies and configuration
 
@@ -12,39 +12,46 @@ uploads use transport-read tracking with the client's own bars disabled.
 Inspect and test request construction before changing the pin. Multipart resume
 uses the existing HTTP dependencies, rather than a separate uploader package.
 
-Config discovery is independent of the working directory: explicit config,
-the environment override, the editable checkout, then the XDG location.
-Private config, credentials, recordings and logs must stay out of Git.
+Config discovery is independent of the working directory: explicit config, the
+environment override, the editable checkout, then the XDG location. Private
+config, credentials, recordings and logs must stay out of Git.
 
-Collection mappings live in `[uploader.collections]`. The TOML writer keeps
-comments and unrelated settings, locks the config directory and replaces the
-file atomically. Tests cover concurrent writers and failed replacements.
+Named preference tables live in `[uploader.collections.PREFIX]`, with
+`collection`, optional `creator` and optional `genre`. Legacy strings work.
+Collection tables are saved after basic uploader and views settings. The TOML
+writer keeps comments and unrelated settings, locks the config directory and
+replaces the file atomically. Tests cover concurrent writers and failed
+replacements.
 
 ## Metadata and review
 
-Reviewed metadata stays in memory and in the optional project log. Show files
-are never edited, moved or deleted. Runtime comes from exact FLAC sample
-counts and is rounded once; full metadata/runtime modes require the complete
-local FLAC inventory. Upload-only mode deliberately avoids computing or
-writing a potentially partial runtime.
+Reviewed Archive metadata stays in memory and the optional project log. Normal
+runs first apply an approved local preparation plan; `-p` stops there.
+Metadata-only, runtime-only, upload-only and cleanup-only skip preparation. See
+[Preparation](PREPARATION.md) for local mutation and rollback boundaries.
+Runtime comes from exact FLAC sample counts and is rounded once; full
+metadata/runtime modes require the complete local FLAC inventory. Upload-only
+mode deliberately avoids computing or writing a potentially partial runtime.
 
 Descriptions remain literal plain text in TXT files, review and logs. HTML
 escaping happens only when sending the description to Archive. This keeps
 angle-bracket email credits, ampersands and other literal text visible.
 
-Fresh reviews can suggest Creator/Title naming from recent collection items.
-The authenticated uploader email takes precedence over a transferer-name
-match. Up to three personal uploads are checked first, then up to three other
-uploads if needed. A strict majority of at least two matching naming patterns
-is required. Suggestions use the current show's venue and date. Saved reviews
-take precedence, and an existing item's current naming seeds a fresh review.
-Offline previews and completion do not perform the lookup.
+Approved Creator preferences are saved and suppress repeated history lookup.
+Preparation saves approved Genre for an existing collection mapping, even in
+`-p` mode. Otherwise fresh reviews can suggest Creator/Title naming from recent
+collection items. The authenticated uploader email takes precedence over a
+transferer-name match. Up to three personal uploads are checked first, then up
+to three other uploads if needed. A strict majority of at least two matching
+naming patterns is required. Suggestions use the current show's venue and date.
+Saved reviews take precedence, and an existing item's current naming seeds a
+fresh review. Offline previews and completion do not perform the lookup.
 
 Normal resumes protect existing creation fields. Metadata-only mode permits
 reviewed Creator/Title corrections and sends server-side expectations for
-changed values. Identifier, Collection and Mediatype remain protected.
-Metadata updates complete before file transfers; a new item starts with its
-notes TXT and reviewed creation metadata before other transfers begin.
+changed values. Identifier, Collection and Mediatype remain protected. Metadata
+updates complete before file transfers; a new item starts with its notes TXT
+and reviewed creation metadata before other transfers begin.
 
 See [source inference](SOURCE_PARSING.md) for source and lineage rules.
 
@@ -53,65 +60,73 @@ See [source inference](SOURCE_PARSING.md) for source and lineage rules.
 The worker limit bounds concurrent file transfers, including small files and
 FLACs. Each active worker owns an independent Archive session. A fatal error
 stops scheduling new files and drains existing workers before the run exits.
-Cancellation interrupts body reads and retry waits; a blocked request may
-still need to reach its socket timeout.
+Cancellation interrupts body reads and retry waits; a blocked request may still
+need to reach its socket timeout.
 
 Remote whole-file MD5 and size establish a verified skip or recovery success.
 Preflight HEAD checks also recognize completed files absent from an inventory
-response. Known conflicts stop the run unless replacement is authorized with
-`--force`. Explicit `--trust-log` can accept a matching prior server
-acknowledgement when remote checks are inconclusive; it cannot override a
-known conflict.
+response. Known conflicts require `r`/`a` approval or cancellation before
+workers start. Choosing `a` still skips matching files; legacy `--force`
+uploads all. Explicit `--trust-log` can accept a matching prior server
+acknowledgement when remote checks are inconclusive; it cannot override a known
+conflict.
 
 Ordinary PUT recovery checks uncertain acknowledgements before resending.
 Confirmed absence permits a fresh PUT; unknown state triggers further checks
 instead of a blind retransmission. Incomplete ordinary PUTs restart in full.
 
-Each FLAC PUT requests derivation; small-file PUTs suppress it. Multipart
-completion requests derivation for its assembled FLAC. A final item derive
-request follows successful processing of all selected files, including skips.
-Direct Tasks API submissions use `derive.php`; `derive` is not a supported
-command name. The per-file upload header is a separate mechanism.
+Without selected cleanup, each FLAC PUT requests derivation; small-file PUTs
+suppress it. Multipart completion requests derivation for its assembled FLAC. A
+final item derive request follows successful processing of all selected files,
+including skips. Direct Tasks API submissions use `derive.php`; `derive` is not
+a supported command name. The per-file upload header is a separate mechanism.
 Metadata-only and runtime-only modes do not queue file derivation. Task
-acceptance does not establish that Archive has finished processing it.
-Upload-only mode selects TXT, JPG, FFP, MD5 and FLAC files. It skips metadata
-review, item metadata writes and runtime calculation; ordinary checksum checks
-and multipart resume still apply. It requires an existing item.
+acceptance does not establish that Archive has finished processing it. Upload-
+only mode selects TXT, JPG, FFP, MD5 and FLAC files. It skips metadata review,
+item metadata writes and runtime calculation; ordinary checksum checks and
+multipart resume still apply. It requires an existing item.
 
-The exact `derive.php already queued/running` application error is accepted
-as an existing pending task. Other errors remain failures and are recorded
-with their message. A failure after all selected files verify has dashboard
-status `derive failed`; its verified bytes and file counts remain in TOTAL.
-These requests are item-wide, even when triggered by one file's completion.
-Staging parts can currently be detected by an unrelated item derive; no
-verified file-selection or staging-exclusion mechanism is implemented yet.
+The exact `derive.php already queued/running` application error is accepted as
+an existing pending task. Other errors remain failures and are recorded with
+their message. A failure after all selected files verify has dashboard status
+`derive failed`; its verified bytes and file counts remain in TOTAL. These
+requests are item-wide, even when triggered by one file's completion. Selected
+cleanup defers per-file derives until corrected uploads verify and approved
+originals are deleted without cascade. Bounded metadata/HEAD polling confirms
+absence before final derive. Pending deletion exits while retaining
+`delete_accepted`; rerun cleanup later. Acceptance is not finality. Known local
+multipart checkpoints block deletion and conflicting payloads. An interrupted
+replacement can resume its own matching payload checkpoint. Assembly started on
+another host without a local checkpoint cannot be guaranteed detectable;
+unrelated derives may still see staging parts. No staging-exclusion mechanism
+is implemented.
 
 ## File resume and the upload log
 
 Resume is enabled by default, with settings under `[uploader.resume]` and
-`--no-resume` as the command-line opt-out. It streams
-bounded parts directly from the original FLAC, serially within each file's
-worker slot. The default part size is 16 MiB. Small FLACs that fit in one part
-and non-FLAC files retain the ordinary PUT path. An existing checkpoint keeps
-its original part size even if the configured default changes.
+`--no-resume` as the command-line opt-out. It streams bounded parts directly
+from the original FLAC, serially within each file's worker slot. The default
+part size is 16 MiB. Small FLACs that fit in one part and non-FLAC files retain
+the ordinary PUT path. An existing checkpoint keeps its original part size even
+if the configured default changes.
 
 Resume state lives in the existing project `<identifier>_lma.log`; no separate
-resume files, temporary audio copies or comparison downloads are created.
-State includes the target, source size/full MD5, upload ID, part size,
-acknowledged part hashes and completion phase. API credentials are excluded.
+resume files, temporary audio copies or comparison downloads are created. State
+includes the target, source size/full MD5, upload ID, part size, acknowledged
+part hashes and completion phase. API credentials are excluded.
 
-The journal writes incremental `resume_start`, `resume_part` and
-`resume_phase` events under its thread lock. Writes are flushed and synced;
-logs use private permissions. Replay isolates files and upload IDs, ignores
-torn JSON/UTF-8 lines and retains later valid records. A `resume_clear` event
-clears active state after verification without deleting the log's history.
-Resume with logging disabled is rejected before network access or review.
-`NoSuchBucket` during initiation uses the bounded recovery retry budget: a
-newly accepted item may not yet be available to multipart requests. This
-exception does not restart an existing multipart transfer. XML error responses
-retain HTTP status in the log; failed worker rows also display the message.
-Multipart part PUTs use a 300-second socket timeout for both writes and reads,
-matching ordinary uploads. Control requests retain a 30-second connect timeout.
+The journal writes incremental `resume_start`, `resume_part` and `resume_phase`
+events under its thread lock. Writes are flushed and synced; logs use private
+permissions. Replay isolates files and upload IDs, ignores torn JSON/UTF-8
+lines and retains later valid records. A `resume_clear` event clears active
+state after verification without deleting the log's history. Resume with
+logging disabled is rejected before network access or review. `NoSuchBucket`
+during initiation uses the bounded recovery retry budget: a newly accepted item
+may not yet be available to multipart requests. This exception does not restart
+an existing multipart transfer. XML error responses retain HTTP status in the
+log; failed worker rows also display the message. Multipart part PUTs use a
+300-second socket timeout for both writes and reads, matching ordinary uploads.
+Control requests retain a 30-second connect timeout.
 
 When supported, server part listings are reconciled against local hashes. If
 listing is unavailable, locally acknowledged parts can be reused, but
@@ -136,22 +151,22 @@ Show sessions start with the identifier. The separate `lmau` dashboard reads
 private atomic status snapshots. These snapshots are display-only and never
 authorize upload skips or retries; the upload log holds resumable part state.
 
-Dashboard bytes cover selected files, including small files in normal mode.
-The completed-file counter always counts FLACs, including verified skips.
-Partial multipart bytes do not count as completed FLACs. Rates count current
-transport reads, excluding hashing and bytes restored from checkpoints.
-Interrupted runs retain confirmed files and checkpointed part bytes.
-The view smooths heartbeat rates with a 30-second exponential time constant.
-Repeated reads of one snapshot do not apply smoothing again. Timing starts
-at the current upload process, not the first historical log entry; finished
-and stale rows freeze at their final heartbeat. Remaining time covers bytes
-only, excluding unpredictable server acknowledgement and derive scheduling.
+Dashboard bytes cover selected files, including small files in normal mode. The
+completed-file counter always counts FLACs, including verified skips. Partial
+multipart bytes do not count as completed FLACs. Rates count current transport
+reads, excluding hashing and bytes restored from checkpoints. Interrupted runs
+retain confirmed files and checkpointed part bytes. The view smooths heartbeat
+rates with a 30-second exponential time constant. Repeated reads of one
+snapshot do not apply smoothing again. Timing starts at the current upload
+process, not the first historical log entry; finished and stale rows freeze at
+their final heartbeat. Remaining time covers bytes only, excluding
+unpredictable server acknowledgement and derive scheduling.
 
 The TOTAL row includes active runs and successful runs observed in that view.
 Failed, cancelled and stale attempts remain visible but are excluded from the
-aggregate. Completed rows stay until that dashboard closes, even when their
-on-disk snapshots expire. A new view does not restore old finished runs.
-Closing the dashboard does not stop uploads.
+aggregate. Completed rows stay until that dashboard closes, even when their on-
+disk snapshots expire. A new view does not restore old finished runs. Closing
+the dashboard does not stop uploads.
 
 ## Views and terminal state
 
@@ -168,11 +183,11 @@ Multipart initiation uses the bare `?uploads` subresource, including redirects.
 Request failures log the operation, attempt, exception and HTTP status before
 retrying, even if no upload ID exists yet. Credential strings are redacted.
 
-Views batches count requests and retains successful cached values until
-reload or exit. A failed replacement search preserves the last successful
-cached result. Unknown view counts remain unknown; totals include successful
-counts, and zero-view recordings are excluded from averages by default.
-Malformed runtimes are excluded from runtime statistics.
+Views batches count requests and retains successful cached values until reload
+or exit. A failed replacement search preserves the last successful cached
+result. Unknown view counts remain unknown; totals include successful counts,
+and zero-view recordings are excluded from averages by default. Malformed
+runtimes are excluded from runtime statistics.
 
 Terminal cleanup avoids cursor-up erasure after screen restoration. Preserve
 the established menu, prompts and spacing when changing query or transport
@@ -193,6 +208,12 @@ Pseudo-terminal checks cover display ordering, alignment and resizing.
 
 These checks do not perform live Archive uploads. Automated tmux checks use
 mocks for launching, quoting, environment forwarding and session isolation;
-they do not reproduce an SSH disconnect/reconnect. A controlled live
-interrupted/resumed multipart upload and final size/MD5 verification remain
-required before making file resume the default.
+they do not reproduce an SSH disconnect/reconnect. Users report successful end-
+to-end Archive uploads, including multipart assembly. Our automated network
+tests are mocked, not independent live verification. Resume is already enabled
+by default; no new live upload was performed for these docs.
+Run `uv run --locked python -B -m tests` for a passed-test progress bar. Test
+stdout/stderr is buffered; only failure tracebacks and their captured output
+are shown. Skipped and expected-failure tests are identified separately. The
+runner returns nonzero for failures, errors or unexpected successes. Standard
+`unittest discover` remains available for debugging individual tests.

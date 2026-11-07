@@ -3,7 +3,7 @@
 import io
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -243,16 +243,17 @@ class RecoveryTests(unittest.TestCase):
             "ETag": f'"{self.digest}"',
             "Content-Length": str(self.size),
         }
-        cli.upload_files(
-            self.session,
-            item,
-            [self.path],
-            {},
-            self.journal,
-            0,
-            0,
-            recovery=POLICY,
-        )
+        with redirect_stderr(self.output):
+            cli.upload_files(
+                self.session,
+                item,
+                [self.path],
+                {},
+                self.journal,
+                0,
+                0,
+                recovery=POLICY,
+            )
         item.upload_file.assert_not_called()
         self.assertIn("Skipped: remote HEAD", self.output.getvalue())
 

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Review, create and resume Live Music Archive uploads without altering show
-files.
-"""
+"""Prepare, review, create and resume Live Music Archive uploads."""
 
 from __future__ import annotations
 
@@ -12,6 +10,7 @@ import html
 import json
 import os
 import re
+import subprocess
 import sys
 import tomllib
 from contextlib import contextmanager
@@ -23,11 +22,17 @@ from threading import RLock
 
 from internetarchive import ArchiveSession
 from internetarchive.item import Item
+from mutagen import MutagenError
 from requests import HTTPError, RequestException
 
 from lma_tools.config import config_path, read_section
 
-from .collections import load_csv, save_collection, validate
+from .collections import (
+    get_preference,
+    load_csv,
+    save_collection,
+    validate,
+)
 from .core import (
     REQUIRED,
     audio_runtime,
@@ -56,6 +61,12 @@ from .recovery import (
     load_policy,
     upload_with_recovery,
 )
+from .remote import (
+    delete_originals,
+    review_remote,
+    unfinished_cleanup,
+    wait_for_deletion,
+)
 
 
 def transport_metadata(metadata):
@@ -81,6 +92,7 @@ def load_config(path):
         "collections",
         "recovery",
         "upload_workers",
+        "prepare_workers",
         "resume",
     }
     if unknown:
@@ -99,6 +111,9 @@ def load_config(path):
     validate(config.get("collections", {}))
     load_policy(config.get("recovery", {}))
     upload_workers(config.get("upload_workers", 3))
+    from .prepare import preparation_workers
+
+    preparation_workers(config.get("prepare_workers"))
     load_options(config.get("resume", {}))
     return config
 
@@ -109,7 +124,7 @@ def is_output(path):
     try:
         show_identity(path.name)
         suffixes = {p.suffix.lower() for p in path.iterdir() if p.is_file()}
-        return {".txt", ".flac"} <= suffixes
+        return ".txt" in suffixes and bool({".wav", ".flac"} & suffixes)
     except (OSError, ValueError):
         return False
 
@@ -199,6 +214,29 @@ def resolve_show(target, root):
             "Use one of those relative paths."
         )
     raise ValueError(f"No output folder found for {target}. Use lma --list.")
+
+
+def resolve_cleanup(target, root):
+    """Cleanup needs a named local directory, not upload-ready audio."""
+    if target is None:
+        path = Path.cwd()
+    else:
+        path = Path(target).expanduser()
+        if not path.is_dir():
+            path = root / target
+        if not path.is_dir():
+            matches = [
+                child
+                for parent in root.iterdir()
+                if parent.is_dir()
+                for child in parent.iterdir()
+                if child.is_dir() and child.name == target
+            ]
+            if len(matches) != 1:
+                raise ValueError("Select an unambiguous cleanup directory")
+            path = matches[0]
+    show_identity(path.name)
+    return path.resolve(), path.resolve().parent
 
 
 def review_text(identifier, metadata):
@@ -471,7 +509,7 @@ def remote_inventory(item):
     }
 
 
-def ensure_complete_runtime(item, flacs):
+def ensure_complete_runtime(item, flacs, ignored=()):
     local = {p.name for p in flacs}
     remote = {
         name
@@ -479,7 +517,7 @@ def ensure_complete_runtime(item, flacs):
         if name.lower().endswith(".flac")
         and entry.get("source", "original") == "original"
     }
-    missing = remote - local
+    missing = remote - local - set(ignored)
     if missing:
         raise ValueError(
             "Runtime requires the complete show; remote FLACs missing "
@@ -519,13 +557,17 @@ def upload_files(
     workers=1,
     tracker=None,
     multipart=None,
+    replacements=None,
+    defer_derive=False,
 ):
     options = multipart if multipart is not None else MultipartOptions()
     policy = recovery if recovery is not None else RecoveryPolicy()
     workers = upload_workers(workers)
     selected = list(files)
+    replacements = replacements or {}
     remote = remote_inventory(item) if item.exists else {}
     total_size = sum(p.stat().st_size for p in selected)
+    board = ProgressBoard(files=selected, tracker=tracker)
 
     def transfer(
         session,
@@ -534,27 +576,35 @@ def upload_files(
         index,
         metadata,
         verbose=False,
-        notify=print,
+        notify=None,
         cancel=None,
         on_state=None,
         quiet=False,
         progress=None,
     ):
         check_cancelled(cancel)
+        if notify is None:
+            notify = board.message if board.enabled else print
         if not quiet:
             notify(
                 f"[{index}/{len(selected)}] Checking {path.name}", flush=True
             )
         digest, size, stamp = file_md5(path)
+        replace = force or path.name in replacements
+        if isinstance(replacements, dict) and path.name in replacements:
+            if replacements[path.name] != (digest, size):
+                raise ValueError(
+                    f"Local file changed after replacement review: {path.name}"
+                )
         entry = remote.get(path.name)
         reason = None
         if (
-            not force
+            not replace
             and entry is not None
             and remote_matches(entry, digest, size)
         ):
             reason = "remote MD5 and size match"
-        elif not force and item.exists and entry is None:
+        elif not replace and item.exists and entry is None:
             if corroborate_log(
                 session, item.identifier, path.name, digest, size
             ):
@@ -567,6 +617,7 @@ def upload_files(
                     "acknowledgement"
                 )
         if reason:
+            board.complete(path.name)
             if tracker is not None:
                 tracker.complete(path.name)
             if not quiet:
@@ -577,7 +628,7 @@ def upload_files(
             return "skipped"
         if (
             entry is not None
-            and not force
+            and not replace
             and not remote_matches(entry, digest, size)
         ):
             if entry.get("md5"):
@@ -588,7 +639,7 @@ def upload_files(
         journal.append("upload_started", name=path.name, md5=digest, size=size)
         own_row = progress is None
         if own_row:
-            progress = ProgressBoard(tracker=tracker).row(path, index)
+            progress = board.row(path, index)
         try:
 
             def send():
@@ -598,7 +649,9 @@ def upload_files(
                     metadata=transport_metadata(metadata),
                     checksum=False,
                     verify=True,
-                    queue_derive=path.suffix.lower() == ".flac",
+                    queue_derive=(
+                        not defer_derive and path.suffix.lower() == ".flac"
+                    ),
                     retries=retries,
                     retries_sleep=retry_sleep,
                     headers={"x-archive-size-hint": str(total_size)},
@@ -626,6 +679,7 @@ def upload_files(
                     policy,
                     progress,
                     cancel,
+                    queue_derive=not defer_derive,
                 ).run()
             else:
                 with watch_transfer(session, path, tracker, progress, cancel):
@@ -639,11 +693,12 @@ def upload_files(
                         stamp,
                         journal,
                         policy,
-                        force,
+                        replace,
                         notify=notify if not verbose else None,
                         cancel=cancel,
                         on_state=on_state,
                     )
+            board.complete(path.name)
             if tracker is not None:
                 tracker.complete(path.name)
             journal.append(
@@ -663,50 +718,60 @@ def upload_files(
                 progress.close()
         return "complete"
 
-    if workers == 1 or len(selected) <= 1:
-        for index, path in enumerate(selected, 1):
-            transfer(session, item, path, index, metadata)
-        return
-    entries = list(enumerate(selected, 1))
-    snapshot = deepcopy(item.item_metadata)
-    if not item.exists:
-        if selected[0].suffix.lower() != ".txt":
-            raise ValueError("A new item must start with its notes TXT")
-        transfer(session, item, selected[0], 1, metadata)
-        entries = entries[1:]
-        snapshot = {"metadata": {**metadata, "identifier": item.identifier}}
-    workers = min(workers, len(entries))
+    try:
+        if workers == 1 or len(selected) <= 1:
+            for index, path in enumerate(selected, 1):
+                transfer(session, item, path, index, metadata)
+            return
+        entries = list(enumerate(selected, 1))
+        snapshot = deepcopy(item.item_metadata)
+        if not item.exists:
+            if selected[0].suffix.lower() != ".txt":
+                raise ValueError("A new item must start with its notes TXT")
+            transfer(session, item, selected[0], 1, metadata)
+            entries = entries[1:]
+            snapshot = {
+                "metadata": {**metadata, "identifier": item.identifier}
+            }
+        workers = min(workers, len(entries))
 
-    def concurrent(index, path, slot, board, cancel):
-        row = board.row(path, index)
-        try:
-            with TransferSession(
-                row, cancel, config=deepcopy(session.config)
-            ) as active:
-                active.cookies.update(session.cookies)
-                worker_item = Item(active, item.identifier, deepcopy(snapshot))
-                state = transfer(
-                    active,
-                    worker_item,
-                    path,
-                    index,
-                    {},
-                    verbose=False,
-                    notify=row.message,
-                    cancel=cancel,
-                    on_state=row.status,
-                    quiet=board.enabled,
-                    progress=row,
-                )
-                row.finish(state)
-        except Exception as exc:
-            detail = " ".join(str(exc).splitlines())[:300]
-            row.message(f"Failed: {type(exc).__name__}: {detail}")
-            raise
-        finally:
-            row.close()
+        def concurrent(index, path, slot, board, cancel):
+            row = board.row(path, index)
+            try:
+                with TransferSession(
+                    row, cancel, config=deepcopy(session.config)
+                ) as active:
+                    active.cookies.update(session.cookies)
+                    worker_item = Item(
+                        active, item.identifier, deepcopy(snapshot)
+                    )
+                    state = transfer(
+                        active,
+                        worker_item,
+                        path,
+                        index,
+                        {},
+                        verbose=False,
+                        notify=row.message,
+                        cancel=cancel,
+                        on_state=row.status,
+                        quiet=board.enabled,
+                        progress=row,
+                    )
+                    row.finish(state)
+            except Exception as exc:
+                detail = " ".join(str(exc).splitlines())[:300]
+                row.message(f"Failed: {type(exc).__name__}: {detail}")
+                raise
+            finally:
+                row.close()
 
-    run_parallel(entries, workers, concurrent, tracker=tracker)
+        run_parallel(
+            entries, workers, concurrent, board=board, tracker=tracker
+        )
+
+    finally:
+        board.close()
 
 
 def tmux_session_name(identifier):
@@ -723,6 +788,22 @@ def parser():
         help="output identifier, project name or explicit directory",
     )
     modes = p.add_mutually_exclusive_group()
+    modes.add_argument(
+        "-p",
+        "--prepare",
+        action="store_true",
+        help="prepare local audio, tags and manifests; no upload",
+    )
+    modes.add_argument(
+        "--clean",
+        action="store_true",
+        help="review obsolete remote originals; no preparation or upload",
+    )
+    p.add_argument(
+        "--no-clean",
+        action="store_true",
+        help="omit remote cleanup review during a normal upload",
+    )
     modes.add_argument(
         "-u",
         "--upload",
@@ -813,13 +894,38 @@ def parser():
 def run_upload(args, directory, project, config):
     identifier = args.identifier or directory.name
     abbreviation, _ = show_identity(identifier)
-    notes, small, flacs = discover(
-        directory, args.notes.resolve() if args.notes else None
-    )
-    validate_fingerprints(directory, flacs, allow_missing=args.upload)
+    if args.clean:
+        notes = None
+        from .core import SMALL
+
+        local = sorted(p for p in directory.iterdir() if p.is_file())
+        small = [p for p in local if p.suffix.lower() in SMALL]
+        flacs = [p for p in local if p.suffix.lower() == ".flac"]
+    else:
+        notes, small, flacs = discover(
+            directory, args.notes.resolve() if args.notes else None
+        )
+    if args.upload:
+        from .prepare import validate_manifests
+
+        report = validate_manifests(directory)
+        for warning in report.get("warnings", []):
+            print("Manifest warning: " + warning)
+        if not report["valid"]:
+            print("Local manifests need attention:")
+            for error in report["errors"]:
+                print("  " + error)
+            if args.preview:
+                raise ValueError("Stale manifests; preview made no changes")
+            if input("Type REBUILD to regenerate FFP/MD5 only: ") != "REBUILD":
+                raise ValueError("Manifest repair cancelled")
+            validate_manifests(directory, repair=True)
+            notes, small, flacs = discover(directory, notes)
+    if not args.clean:
+        validate_fingerprints(directory, flacs, allow_missing=args.upload)
     # -u deliberately never computes a partial runtime, even if tracks were
     # moved out.
-    runtime = None if args.upload else audio_runtime(flacs)
+    runtime = None if args.upload or args.clean else audio_runtime(flacs)
     journal = Journal(
         project / f"{identifier}_lma.log",
         identifier,
@@ -828,7 +934,7 @@ def run_upload(args, directory, project, config):
     metadata = {}
     if args.runtime:
         metadata = {"runtime": runtime}
-    elif not args.upload:
+    elif not (args.upload or args.clean):
         metadata = parse_notes(
             notes.read_text(encoding="utf-8-sig"), identifier
         )
@@ -847,23 +953,34 @@ def run_upload(args, directory, project, config):
         collection = (
             args.collection
             or metadata.get("collection")
-            or config.get("collections", {}).get(abbreviation)
+            or get_preference(config, abbreviation).get("collection")
         )
         if not collection and not args.preview:
             collection = input(
                 f"Collection identifier for {abbreviation}: "
             ).strip()
+        saved = get_preference(config, abbreviation)
+        if not previous and saved.get("creator"):
+            metadata["creator"] = saved["creator"]
+            metadata["title"] = (
+                f"{saved['creator']} Live at {metadata['venue']} "
+                f"on {metadata['date']}"
+            )
         metadata.update(collection=collection or "", runtime=runtime)
         metadata["scanner"] = f"lma-tools v{version('lma-tools')}"
         if not args.preview:
             identifier, metadata = edit_review(
-                identifier, metadata, history=not bool(previous)
+                identifier,
+                metadata,
+                history=not bool(previous or saved.get("creator")),
             )
             metadata["runtime"] = runtime
             journal = Journal(
                 project / f"{identifier}_lma.log", identifier, journal.enabled
             )
-    files = [] if (args.runtime or args.metadata) else small + flacs
+    files = (
+        [] if (args.runtime or args.metadata or args.clean) else small + flacs
+    )
     print(f"Output folder: {directory}\nProject root: {project}")
     print(f"Destination: https://archive.org/details/{identifier}")
     print(review_text(identifier, metadata))
@@ -878,7 +995,7 @@ def run_upload(args, directory, project, config):
         input("Type UPLOAD to proceed (anything else cancels): ").strip()
         != "UPLOAD"
     ):
-        print("Cancelled; no log or Archive.org changes made.")
+        print("Cancelled; no Archive.org changes made. Preparation retained.")
         return 0
     journal.append(
         "run_start",
@@ -913,14 +1030,49 @@ def run_upload(args, directory, project, config):
         item = session.get_item(
             identifier, request_kwargs={"timeout": (30, 60)}
         )
-        if (args.upload or args.runtime or args.metadata) and not item.exists:
+        if (
+            args.upload or args.runtime or args.metadata or args.clean
+        ) and not item.exists:
             raise ValueError(
                 "Item does not exist; run without -u/-r/-m to create it."
             )
         existed = bool(item.exists)
-        if existed and not args.upload:
-            ensure_complete_runtime(item, flacs)
-        if existed and not (args.upload or args.runtime):
+        replacements, deletions = set(), []
+        prior_cleanup = []
+        if existed and not (args.runtime or args.metadata):
+            prior_cleanup = unfinished_cleanup(journal)
+            for entry in prior_cleanup:
+                wait_for_deletion(
+                    session,
+                    identifier,
+                    entry,
+                    journal,
+                    load_policy(config.get("recovery", {})),
+                )
+        if prior_cleanup:
+            item = session.get_item(
+                identifier, request_kwargs={"timeout": (30, 60)}
+            )
+        if existed and not (args.runtime or args.metadata):
+            replacements, deletions = review_remote(
+                item,
+                small + flacs,
+                journal,
+                clean=args.clean or (not args.upload and not args.no_clean),
+                force=args.force,
+                replacements_only=args.clean,
+                session=session,
+            )
+        journal.append(
+            "remote_review",
+            replacements=sorted(replacements),
+            deletions=[entry["name"] for entry in deletions],
+        )
+        if existed and not (args.upload or args.clean):
+            ensure_complete_runtime(
+                item, flacs, ignored={entry["name"] for entry in deletions}
+            )
+        if existed and not (args.upload or args.runtime or args.clean):
             fields = ["date", "collection", "mediatype"]
             if not args.metadata:
                 fields += ["creator", "title"]
@@ -934,7 +1086,7 @@ def run_upload(args, directory, project, config):
                         "It is protected by this script; "
                         "inspect the item before proceeding."
                     )
-        if not (args.upload or args.runtime):
+        if not (args.upload or args.runtime or args.clean):
             collection = session.get_item(
                 metadata["collection"], request_kwargs={"timeout": (30, 60)}
             )
@@ -949,8 +1101,20 @@ def run_upload(args, directory, project, config):
                 args.config,
                 show_identity(identifier)[0],
                 metadata["collection"],
+                creator=metadata["creator"],
+                genre=config.get("prepared_genre"),
             )
-        if args.runtime:
+        if args.clean:
+            delete_originals(
+                session,
+                identifier,
+                deletions,
+                journal,
+                policy=load_policy(config.get("recovery", {})),
+            )
+            if deletions or prior_cleanup:
+                queue_final_derive(session, identifier, journal)
+        elif args.runtime:
             check_response(
                 item.modify_metadata({"runtime": runtime}, timeout=60)
             )
@@ -1007,6 +1171,8 @@ def run_upload(args, directory, project, config):
                     recovery=load_policy(config.get("recovery", {})),
                     tracker=tracker,
                     multipart=config["multipart_options"],
+                    replacements=replacements,
+                    defer_derive=bool(deletions),
                     workers=upload_workers(
                         args.workers
                         if args.workers is not None
@@ -1014,6 +1180,26 @@ def run_upload(args, directory, project, config):
                     ),
                 )
                 files_verified = True
+                if deletions:
+                    from .recovery import remote_state
+
+                    for path in files:
+                        digest, size, _ = file_md5(path)
+                        state, _ = remote_state(
+                            session, identifier, path.name, digest, size
+                        )
+                        if state != "match":
+                            raise ValueError(
+                                "Cleanup postponed: corrected files are "
+                                "not all remotely checksum-confirmed."
+                            )
+                    delete_originals(
+                        session,
+                        identifier,
+                        deletions,
+                        journal,
+                        policy=load_policy(config.get("recovery", {})),
+                    )
                 if tracker is not None:
                     tracker.status("deriving")
                 queue_final_derive(session, identifier, journal)
@@ -1067,6 +1253,8 @@ def main(argv=None):
             or args.session_name
             or args.runtime
             or args.metadata
+            or args.prepare
+            or args.clean
         )
     ):
         raise ValueError(
@@ -1095,13 +1283,55 @@ def main(argv=None):
         ):
             print(token)
         return 0
-    directory, project = resolve_show(args.show, root)
+    if args.clean:
+        directory, project = resolve_cleanup(args.show, root)
+    else:
+        directory, project = resolve_show(args.show, root)
     if args.session_name:
         print(tmux_session_name(args.identifier or directory.name))
         return 0
     if directory == project:
         raise ValueError("Project log must be outside the output folder.")
     with show_lock(directory):
+        if args.prepare or not (
+            args.upload or args.runtime or args.metadata or args.clean
+        ):
+            from .prepare import prepare_show
+
+            prefix, _ = show_identity(args.identifier or directory.name)
+            prepared = prepare_show(
+                directory,
+                get_preference(config, prefix),
+                preview=args.preview,
+                notes=args.notes,
+                workers=config.get("prepare_workers"),
+                journal=Journal(
+                    project / f"{args.identifier or directory.name}_lma.log",
+                    args.identifier or directory.name,
+                    enabled=config.get("log", True) and not args.no_log,
+                ),
+            )
+            config["prepared_genre"] = prepared.get("genre")
+            if not args.preview and "prepared_genre" in config:
+                saved = get_preference(config, prefix)
+                if saved.get("collection"):
+                    save_collection(
+                        args.config,
+                        prefix,
+                        saved["collection"],
+                        genre=config["prepared_genre"],
+                    )
+            if args.prepare or (
+                args.preview
+                and any(
+                    p.suffix.lower() == ".wav" for p in directory.iterdir()
+                )
+            ):
+                if args.preview:
+                    print(
+                        "Preview only: no files written, no network requests."
+                    )
+                return 0
         return run_upload(args, directory, project, config)
 
 
@@ -1110,11 +1340,19 @@ def cli(argv=None, runner=main):
         return runner(argv)
     except KeyboardInterrupt:
         print(
-            "\nCancelled/interrupted. No show files were changed.",
+            "\nCancelled/interrupted. Any completed preparation is retained.",
             file=sys.stderr,
         )
         return 130
-    except (ValueError, KeyError, TypeError, OSError, RequestException) as exc:
+    except (
+        ValueError,
+        KeyError,
+        TypeError,
+        OSError,
+        RequestException,
+        subprocess.SubprocessError,
+        MutagenError,
+    ) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         if isinstance(exc, HTTPError) and exc.response is not None:
             print(

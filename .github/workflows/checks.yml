@@ -11,7 +11,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3
+      - name: Install audio tools for real preparation tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y flac ffmpeg
       - run: uv sync --locked --python ${{ matrix.python }}
       - run: uv run --locked ruff format --check .
       - run: uv run --locked ruff check .
-      - run: uv run --locked python -m unittest discover -s tests -t . -v
+      - run: uv run --locked python -B -m tests
