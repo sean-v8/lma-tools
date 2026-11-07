@@ -289,6 +289,19 @@ class ResumeTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
+    def setUp(self):
+        preparation = patch(
+            "lma_tools.uploader.prepare.prepare_show", return_value={}
+        )
+        preparation.start()
+        self.addCleanup(preparation.stop)
+        manifests = patch(
+            "lma_tools.uploader.prepare.validate_manifests",
+            return_value={"valid": True},
+        )
+        manifests.start()
+        self.addCleanup(manifests.stop)
+
     def setup_show(self, root):
         folder = make_show(root)
         config = root / "config.toml"

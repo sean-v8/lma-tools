@@ -3,7 +3,7 @@
 import os
 import sys
 from contextlib import contextmanager
-from threading import RLock
+from time import monotonic
 from urllib.parse import urlsplit
 
 from internetarchive import ArchiveSession
@@ -104,6 +104,10 @@ def progress_values(bar):
         # Stored parts are progress, but were not transmitted in this run.
         values["rate"] = 0
         values["upload_rate"] = "0.00 B/s"
+    if hasattr(bar, "_wire_rate"):
+        rate = bar._wire_rate()
+        values["rate"] = rate
+        values["upload_rate"] = upload_size(rate) + "/s"
     return values
 
 
@@ -117,6 +121,7 @@ class SharedColumns:
         self.bar_width = 1
         self.bars = []
         self.terminal_width = None
+        self.bounded_clear = False
 
     def metrics(self, values):
         result = {
@@ -173,7 +178,12 @@ class SharedColumns:
                 width = getattr(bars[0], "_rendered_width", 0)
                 wrapped = max(0, width - 1) // max(1, columns)
                 up = f"\x1b[{wrapped}A" if wrapped else ""
-                bars[0].fp.write("\r" + up + "\x1b[J")
+                if self.bounded_clear:
+                    erase = "\x1b[2K"
+                    erase += "\n\x1b[2K" * wrapped
+                    bars[0].fp.write("\r" + up + erase + up + "\r")
+                else:
+                    bars[0].fp.write("\r" + up + "\x1b[J")
             for bar in bars:
                 bar.sp = bar.status_printer(bar.fp)
         self.terminal_width = columns
@@ -206,7 +216,7 @@ class SharedColumns:
 
 
 class ProgressBoard:
-    def __init__(self, stream=None, tracker=None):
+    def __init__(self, stream=None, tracker=None, files=None):
         self.tracker = tracker
         self.stream = stream if stream is not None else sys.stderr
         self.enabled = self.stream.isatty() and os.environ.get("TERM") not in (
@@ -214,9 +224,76 @@ class ProgressBoard:
             "",
             "dumb",
         )
-        self.lock = RLock()
+        # Use tqdm's own reentrant lock, including during monitor refreshes.
+        self.lock = tqdm.get_lock()
         self.rows = []
         self.columns = SharedColumns()
+        self.columns.bounded_clear = files is not None
+        self.sizes = (
+            {path.name: path.stat().st_size for path in files}
+            if files is not None
+            else None
+        )
+        self.active = {}
+        self.confirmed = set()
+        self.wire = 0
+        self.started = monotonic()
+        self.closed = False
+        self.total = None
+        if self.sizes is not None and self.enabled:
+            with self.lock:
+                self.total = OrderedProgress(
+                    total=sum(self.sizes.values()),
+                    desc="TOTAL",
+                    position=0,
+                    delay=1,
+                    leave=False,
+                    dynamic_ncols=True,
+                    unit="B",
+                    file=self.stream,
+                )
+                self.total._wire_rate = self._rate
+                self.total.delay = 0
+                self._redraw()
+
+    def _rate(self):
+        return self.wire / max(monotonic() - self.started, 0.001)
+
+    def _record(self, name, event, value=0):
+        if self.sizes is None or name not in self.sizes or self.closed:
+            return
+        if event == "complete":
+            self.confirmed.add(name)
+            self.active.pop(name, None)
+        elif name not in self.confirmed:
+            if event == "advance":
+                self.wire += max(0, value)
+                value = self.active.get(name, 0) + max(0, value)
+            self.active[name] = min(self.sizes[name], max(0, value))
+        if self.total is not None:
+            self.total.n = sum(self.sizes[n] for n in self.confirmed)
+            self.total.n += sum(self.active.values())
+
+    def complete(self, name):
+        """Credit a confirmed upload or skip; retain it until board close.
+
+        Tracker completion remains the caller's responsibility, as before.
+        """
+        with self.lock:
+            self._record(name, "complete")
+            self._redraw()
+
+    def close(self):
+        """Remove the progress region, including TOTAL, exactly once."""
+        with self.lock:
+            if self.closed:
+                return
+            for row in list(self.rows):
+                self.remove(row)
+            if self.total is not None:
+                self.total.close()
+            self.columns.bars = []
+            self.closed = True
 
     def message(self, text, **kwargs):
         with self.lock:
@@ -226,22 +303,29 @@ class ProgressBoard:
                 print(text, file=self.stream, flush=True)
 
     def _clear(self):
+        if self.total is not None:
+            self.total.clear()
         for row in self.rows:
             if row.bar is not None:
                 row.bar.clear()
 
     def _redraw(self):
         self.rows.sort(key=lambda row: row.order)
-        self.columns.prepare(
-            [row.bar for row in self.rows if row.bar is not None]
-        )
-        for position, row in enumerate(self.rows):
-            if row.bar is not None:
-                row.bar.pos = -position
-                row.bar.refresh()
+        if self.closed:
+            return
+        bars = [row.bar for row in self.rows if row.bar is not None]
+        if self.total is not None:
+            bars.insert(0, self.total)
+        self.columns.bars = bars
+        self.columns.prepare(bars)
+        for position, bar in enumerate(bars):
+            bar.pos = -position
+            bar.refresh()
 
     def row(self, path, order):
         with self.lock:
+            if self.closed:
+                raise RuntimeError("Progress board is closed")
             self._clear()
             row = ProgressRow(self, path, order)
             self.rows.append(row)
@@ -301,7 +385,9 @@ class ProgressRow:
         if self.board.tracker is not None:
             self.board.tracker.begin(self.path.name)
         with self.board.lock:
+            self.board._record(self.path.name, "begin")
             if self.bar is not None:
+                self.bar._resume_offset = 0
                 self.bar.reset()
                 self.bar.set_postfix_str("", refresh=False)
                 self.board._redraw()
@@ -310,6 +396,7 @@ class ProgressRow:
         if self.board.tracker is not None:
             self.board.tracker.resume(self.path.name, offset)
         with self.board.lock:
+            self.board._record(self.path.name, "resume", offset)
             if self.bar is not None:
                 self.bar.reset()
                 self.bar.n = self.bar.initial = self.bar.last_print_n = offset
@@ -320,12 +407,13 @@ class ProgressRow:
         if self.board.tracker is not None:
             self.board.tracker.advance(self.path.name, size)
         with self.board.lock:
+            self.board._record(self.path.name, "advance", size)
             if self.bar is not None:
                 refreshed = self.bar.update(size)
                 if self.bar.n >= self.bar.total:
                     self.bar.set_postfix_str("awaiting ack", refresh=False)
                     refreshed = True
-                if refreshed:
+                if refreshed or self.board.total is not None:
                     self.board._redraw()
 
     def finish(self, state):

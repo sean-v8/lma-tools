@@ -2,6 +2,9 @@
 shows_root = "/path/to/shows"
 log = true
 upload_workers = 3
+# Preparation defaults to one worker per logical CPU, capped by track count.
+# Uncomment to limit simultaneous conversion/tagging jobs on this machine.
+# prepare_workers = 16
 
 [uploader.resume]
 enabled = true
@@ -13,10 +16,6 @@ checks = 3
 delay = 30.0
 max_delay = 300.0
 
-[uploader.collections]
-# identifier_prefix = "ArchiveCollection"
-# gd = "GratefulDead"
-
 [views]
 query = ['collection:(etree OR taperssection)']
 sort = "publicdate"
@@ -24,3 +23,13 @@ reverse = false
 timeout = 30.0
 view_batch_size = 100
 exclude_zero_views = true
+
+# Keep per-collection preferences after all basic uploader/views settings.
+# Replace this generic prefix and values with your approved preferences.
+[uploader.collections.band]
+collection = "ArchiveCollection"
+creator = "Example Artist"
+genre = "Rock"
+
+# Legacy strings under [uploader.collections] are also supported:
+# band = "ArchiveCollection"

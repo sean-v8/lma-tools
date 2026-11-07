@@ -458,7 +458,7 @@ class TransferTests(unittest.TestCase):
 
             board.row = track
             with patch(
-                "lma_tools.uploader.parallel.ProgressBoard", return_value=board
+                "lma_tools.uploader.cli.ProgressBoard", return_value=board
             ):
                 self.upload(self.files(["one.flac", "two.flac", "three.flac"]))
         self.assertEqual(len(rows), 3)

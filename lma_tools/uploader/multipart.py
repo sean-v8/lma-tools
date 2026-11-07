@@ -133,7 +133,9 @@ class MultipartUpload:
         policy,
         progress,
         cancel=None,
+        queue_derive=True,
     ):
+        self.queue_derive = queue_derive
         self.session, self.identifier, self.path = session, identifier, path
         self.digest, self.size, self.stamp = digest, size, stamp
         self.options, self.policy = options, policy
@@ -525,7 +527,9 @@ class MultipartUpload:
                 data=ET.tostring(root),
                 headers={
                     "Content-Type": "application/xml",
-                    "x-archive-queue-derive": "1",
+                    "x-archive-queue-derive": "1"
+                    if self.queue_derive
+                    else "0",
                 },
             )
         except Exception as exc:

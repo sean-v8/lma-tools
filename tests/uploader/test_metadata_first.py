@@ -40,6 +40,9 @@ class MetadataFirstTests(TestCase):
             session.submit_task.return_value = response()
             args = ["--config", str(config), ID]
             with (
+                patch(
+                    "lma_tools.uploader.prepare.prepare_show", return_value={}
+                ),
                 patch.object(lma, "audio_runtime", return_value="2:05:50"),
                 patch.object(
                     lma, "edit_review", side_effect=lambda i, m, **kw: (i, m)
