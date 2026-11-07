@@ -18,7 +18,7 @@ class ConfigTests(unittest.TestCase):
     def config(self, text):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
-            path.write_text(text)
+            path.write_text("[report]\n" + text)
             return load_config(path)
 
     def test_valid(self):

@@ -1,6 +1,5 @@
 """Private collection mappings with comment-preserving TOML updates."""
 
-import csv
 import fcntl
 import os
 import stat
@@ -9,7 +8,7 @@ from pathlib import Path
 
 import tomlkit
 
-from lma_tools.config import SECTION_NAMES, section_key
+from lma_tools.config import SECTION_NAMES
 
 
 def preference(value):
@@ -43,25 +42,8 @@ def validate(values):
 
 
 def get_preference(config, prefix):
-    if "prefix" in config and "collections" in config:
-        raise ValueError("Use only upload.prefix, not both mapping tables")
-    value = config.get("prefix", config.get("collections", {})).get(prefix)
+    value = config.get("prefix", {}).get(prefix)
     return preference(value) if value is not None else {}
-
-
-def load_csv(path):
-    """Read and validate a two-column prefix/collection CSV."""
-    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
-        values = {}
-        for number, row in enumerate(csv.reader(handle), 1):
-            if not row:
-                continue
-            if len(row) != 2 or not all(part.strip() for part in row):
-                raise ValueError(f"Invalid collection CSV row {number}")
-            if row[0] in values and values[row[0]] != row[1]:
-                raise ValueError(f"Conflicting collection prefix: {row[0]}")
-            values[row[0]] = row[1]
-    return values
 
 
 def replace_text(path, text):
@@ -102,18 +84,15 @@ def save_collection(path, abbreviation, collection, creator=None, genre=None):
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         document = tomlkit.parse(path.read_text(encoding="utf-8"))
-        key = section_key(document, "upload") or "upload"
-        section = (
-            document.setdefault(key, tomlkit.table())
-            if SECTION_NAMES.intersection(document)
-            else document
-        )
-        if "prefix" in section and "collections" in section:
-            raise ValueError("Use only upload.prefix, not both mapping tables")
-        mapping_key = "collections" if "collections" in section else "prefix"
-        if mapping_key not in section:
-            section[mapping_key] = tomlkit.table()
-        values = section[mapping_key]
+        unknown = set(document) - SECTION_NAMES
+        if unknown:
+            raise ValueError(f"Unknown config sections: {sorted(unknown)}")
+        section = document.setdefault("upload", tomlkit.table())
+        if "collections" in section:
+            raise ValueError("Unknown upload setting: collections")
+        if "prefix" not in section:
+            section["prefix"] = tomlkit.table()
+        values = section["prefix"]
         validate(values)
         existing = values.get(abbreviation)
         if creator is None and genre is None:
@@ -144,14 +123,11 @@ def save_collection(path, abbreviation, collection, creator=None, genre=None):
                 values[abbreviation] = updated
         sort_prefixes(values)
         # Keep prefix blocks after ordinary upload/report settings.
-        del section[mapping_key]
+        del section["prefix"]
         text = tomlkit.dumps(document).rstrip() + "\n\n"
         tail = tomlkit.document()
-        if section is document:
-            tail[mapping_key] = values
-        else:
-            tail[key] = tomlkit.table(is_super_table=True)
-            tail[key][mapping_key] = values
+        tail["upload"] = tomlkit.table(is_super_table=True)
+        tail["upload"]["prefix"] = values
         text += tomlkit.dumps(tail).lstrip("\n")
         tomlkit.parse(text)
         if text != path.read_text(encoding="utf-8"):

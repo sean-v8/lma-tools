@@ -1,4 +1,4 @@
-"""Shared config, migration and installed-launcher regression coverage."""
+"""Shared config and installed-launcher regression coverage."""
 
 import io
 import os
@@ -13,7 +13,6 @@ from unittest.mock import Mock, patch
 from lma_tools.config import config_path
 from lma_tools.report.config import load_config
 from lma_tools.upload import cli, launcher
-from tests.helpers import migration
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,30 +38,6 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(config_path(path), path)
                 with self.assertRaises(FileNotFoundError):
                     load_config()
-
-    def test_migration_preserves_values_and_refuses_overwrite(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            up, view, dest = (root / name for name in ("u", "v", "merged"))
-            up.mkdir()
-            view.mkdir()
-            (up / "config.toml").write_text(f'shows_root = "{tmp}"\n')
-            (view / "config.toml").write_text('query = ["venue:demo"]\n')
-            (up / "collections.csv").write_text("band,collection\n")
-            with redirect_stdout(io.StringIO()):
-                migration.merge(up, view, dest / "config.toml")
-            self.assertEqual(
-                load_config(dest / "config.toml").query, ("venue:demo",)
-            )
-            self.assertEqual(
-                cli.load_config(dest / "config.toml")["prefix"],
-                {"band": "collection"},
-            )
-            before = (dest / "config.toml").read_bytes()
-            self.assertFalse((dest / "collections.csv").exists())
-            with self.assertRaises(FileExistsError):
-                migration.merge(up, view, dest / "config.toml")
-            self.assertEqual((dest / "config.toml").read_bytes(), before)
 
     def test_tmux_forwards_environment_and_quotes_arguments(self):
         with tempfile.TemporaryDirectory(prefix="lma tools ") as tmp:
@@ -159,3 +134,18 @@ class IntegrationTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_config_requires_known_table_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            for text in (
+                'query=["collection:demo"]',
+                '[other]\nsort="views"',
+                'upload="invalid"\n[report]\nsort="views"',
+            ):
+                with self.subTest(text=text):
+                    path.write_text(text)
+                    before = path.read_bytes()
+                    with self.assertRaises(ValueError):
+                        load_config(path)
+                    self.assertEqual(path.read_bytes(), before)

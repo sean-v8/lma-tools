@@ -49,7 +49,7 @@ class DiscoveryTests(unittest.TestCase):
             p = Path(tmp) / "config.toml"
             with self.assertRaisesRegex(ValueError, "Create"):
                 lma.load_config(p)
-            p.write_text('shows_root = "relative"')
+            p.write_text('[upload]\nshows_root = "relative"')
             with self.assertRaisesRegex(ValueError, "absolute"):
                 lma.load_config(p)
 

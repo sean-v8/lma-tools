@@ -88,10 +88,6 @@ def load_config(path):
             "and set shows_root for this machine."
         )
     config = read_section(path, "upload")
-    if "collections" in config:
-        if "prefix" in config:
-            raise ValueError("Use only upload.prefix, not both mapping tables")
-        config["prefix"] = config.pop("collections")
     unknown = set(config) - {
         "shows_root",
         "log",
@@ -1073,9 +1069,7 @@ def run_upload(args, directory, project, config):
         previous = None if args.fresh_metadata else journal.reviewed_metadata()
         if previous:
             previous = dict(previous)
-            legacy_name = previous.pop("uploader", None)
-            if legacy_name and "@" not in legacy_name:
-                previous.setdefault("transferer", legacy_name)
+            previous.pop("uploader", None)
             # TXT-derived fields are authoritative on every ordinary run.
             # Retain only extra fields that have no local notes equivalent.
             metadata.update(
