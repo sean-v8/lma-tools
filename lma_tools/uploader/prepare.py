@@ -18,7 +18,14 @@ from mutagen.flac import FLAC
 
 from . import ui
 from .core import SMALL, show_identity
-from .encoder import encode_verbatim, tag_audio, tags_match, verify_pcm
+from .encoder import (
+    LEGACY_TOTALS,
+    MANAGED_TAGS,
+    encode_verbatim,
+    tag_audio,
+    tags_match,
+    verify_pcm,
+)
 from .notes import ROOM_HINTS, SPOT_HINTS
 from .preparation_progress import PreparationProgress
 
@@ -225,6 +232,19 @@ def build_plan(directory, config_entry, notes=None):
                 track=number,
             )
         )
+    inferred_discs = max(row[0] for row in rows)
+    for track in tracks:
+        source = directory / track["source"]
+        if not track["source"] or source.suffix.lower() != ".flac":
+            continue
+        audio = FLAC(source)
+        for field, key, total in (
+            ("disc", "discnumber", inferred_discs),
+            ("track", "tracknumber", len(tracks)),
+        ):
+            value = _existing_number(audio, key)
+            if value and value != f"{track[field]}/{total}":
+                track[field] = value
     artwork = sorted(directory.glob("*.jpg"))
     return dict(
         artist=artist,
@@ -238,22 +258,58 @@ def build_plan(directory, config_entry, notes=None):
     )
 
 
+def _number_pair(value):
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+    if match and int(match[1]) <= int(match[2]):
+        return int(match[1]), int(match[2])
+    return None
+
+
+def _existing_number(audio, key):
+    values = audio.get(key, [])
+    if len(values) != 1:
+        return None
+    if _number_pair(values[0]):
+        return values[0]
+    aliases = (
+        ("totaldiscs", "disctotal")
+        if key == "discnumber"
+        else ("totaltracks", "tracktotal")
+    )
+    for alias in aliases:
+        total = audio.get(alias, [])
+        if len(total) == 1:
+            combined = f"{values[0]}/{total[0]}"
+            if _number_pair(combined):
+                return combined
+    return None
+
+
+def _number(value):
+    return int(value.split("/", 1)[0]) if isinstance(value, str) else value
+
+
+def _review_tags(lines, tags, table):
+    lines.extend(["", f"[{table}]"])
+    for key, value in tags.items():
+        lines.append(f"{json.dumps(key)} = {json.dumps(value)}")
+
+
 def review_text(plan):
     """Render editable TOML without creating a review file."""
     lines = ["# Ctrl-S accepts; Ctrl-C cancels."]
     for key, value in plan.items():
-        if key not in {"tracks", "redundant_wavs"}:
+        if key not in {"tracks", "redundant_wavs", "tags"}:
             lines.append(f"{key} = {json.dumps(value, ensure_ascii=False)}")
     if not plan.get("redundant_wavs"):
         lines.append("redundant_wavs = []")
     disc_total = max(
-        (
-            row["disc"]
-            for row in plan.get("tracks", [])
-            if type(row.get("disc")) is int
-        ),
-        default=1,
+        (_number(row["disc"]) for row in plan.get("tracks", [])), default=1
     )
+    if "tags" in plan:
+        _review_tags(lines, plan["tags"], "tags")
     for table in ("tracks", "redundant_wavs"):
         if table == "redundant_wavs" and plan.get(table):
             lines.extend(
@@ -265,6 +321,8 @@ def review_text(plan):
         for row in plan.get(table, []):
             lines.extend(["", f"[[{table}]]"])
             for key, value in row.items():
+                if key == "tags":
+                    continue
                 if table == "tracks" and type(value) is int:
                     if key == "disc":
                         value = f"{value}/{disc_total}"
@@ -272,7 +330,30 @@ def review_text(plan):
                         value = f"{value}/{len(plan['tracks'])}"
                 encoded = json.dumps(value, ensure_ascii=False)
                 lines.append(f"{key} = {encoded}")
+            if "tags" in row:
+                _review_tags(lines, row["tags"], "tracks.tags")
     return "\n".join(lines) + "\n"
+
+
+def _validate_custom_tags(tags):
+    if not isinstance(tags, dict):
+        raise ValueError("Custom tags must be a TOML table.")
+    seen = set()
+    for key, value in tags.items():
+        if (
+            not isinstance(key, str)
+            or not key.strip()
+            or not re.fullmatch(r"[\x20-\x3c\x3e-\x7d]+", key)
+            or key.lower() in seen
+        ):
+            raise ValueError("Invalid or duplicate custom tag name.")
+        seen.add(key.lower())
+        if key.lower() in MANAGED_TAGS | LEGACY_TOTALS:
+            raise ValueError("Use the preview field for managed tags.")
+        if not isinstance(value, str) and not (
+            isinstance(value, list) and all(isinstance(v, str) for v in value)
+        ):
+            raise ValueError("Custom tag values must be text or text lists.")
 
 
 def validate_plan(text, directory):
@@ -291,7 +372,9 @@ def validate_plan(text, directory):
         if not isinstance(plan.get(key), str) or not plan[key].strip():
             raise ValueError(f"Missing text field: {key}")
     plan.setdefault("redundant_wavs", [])
-    if set(plan) != {
+    if "tags" in plan:
+        _validate_custom_tags(plan["tags"])
+    if set(plan) - {"tags"} != {
         "artist",
         "album",
         "genre",
@@ -316,7 +399,7 @@ def validate_plan(text, directory):
     sources, destinations, discs = set(), set(), set()
     displayed_totals = []
     for number, track in enumerate(tracks, 1):
-        if not isinstance(track, dict) or set(track) != {
+        if not isinstance(track, dict) or set(track) - {"tags"} != {
             "source",
             "destination",
             "title",
@@ -324,14 +407,15 @@ def validate_plan(text, directory):
             "track",
         }:
             raise ValueError("Unknown or missing track fields.")
+        if "tags" in track:
+            _validate_custom_tags(track["tags"])
         for field in ("disc", "track"):
             value = track[field]
-            if isinstance(value, str):
-                match = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
-                if match is None:
-                    raise ValueError(f"{field} must use number/total.")
-                track[field] = int(match[1])
-                displayed_totals.append((field, int(match[2])))
+            pair = _number_pair(value)
+            if pair is None:
+                raise ValueError(f"{field} must use number/total.")
+            track[field] = pair[0]
+            displayed_totals.append((track, field, value, pair[1]))
         for key in ("source", "destination"):
             if not _name(track.get(key)):
                 raise ValueError(f"Invalid or ambiguous {key} at {number}.")
@@ -346,8 +430,8 @@ def validate_plan(text, directory):
             raise ValueError("Destination must end in .flac.")
         if type(track.get("disc")) is not int or track["disc"] < 1:
             raise ValueError("Disc must be a positive integer.")
-        if type(track.get("track")) is not int or track["track"] != number:
-            raise ValueError("Track numbers must be global and consecutive.")
+        if type(track.get("track")) is not int or track["track"] < 1:
+            raise ValueError("Track must be a positive integer.")
         if (
             not isinstance(track.get("title"), str)
             or not track["title"].strip()
@@ -356,10 +440,10 @@ def validate_plan(text, directory):
         sources.add(source)
         destinations.add(destination.casefold())
         discs.add(track["disc"])
-    for field, total in displayed_totals:
-        expected = max(discs) if field == "disc" else len(tracks)
-        if total != expected:
-            raise ValueError(f"{field} total must be {expected}.")
+    for track, field, value, total in displayed_totals:
+        default = max(discs) if field == "disc" else len(tracks)
+        if total != default:
+            track[field] = value
     redundant = plan["redundant_wavs"]
     if not isinstance(redundant, list):
         raise ValueError("redundant_wavs must be an array.")
@@ -548,7 +632,7 @@ def apply_plan(directory, plan, *, workers=None, journal=None):
     plan = validate_plan(review_text(plan), directory)
     artwork = directory / plan["artwork"] if plan["artwork"] else None
     total = len(plan["tracks"])
-    discs = max(t["disc"] for t in plan["tracks"])
+    discs = max(_number(t["disc"]) for t in plan["tracks"])
     matching = not plan["redundant_wavs"] and all(
         t["source"] == t["destination"]
         and tags_match(directory / t["source"], plan, t, total, discs, artwork)
@@ -607,10 +691,11 @@ def apply_plan(directory, plan, *, workers=None, journal=None):
                     else:
                         update(0, "Copying")
                         shutil.copy2(source, target)
-                    update(100, "Tagging")
+                    update(100, "Checking tags")
                     if not tags_match(
                         target, plan, track, total, discs, artwork
                     ):
+                        update(100, "Tagging")
                         tag_audio(target, plan, track, total, discs, artwork)
                     update(100, "Verifying")
                     verify_pcm(source, target)

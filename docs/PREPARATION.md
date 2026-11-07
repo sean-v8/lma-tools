@@ -48,8 +48,13 @@ have been temporarily moved out of the folder.
 Common fields are `artist`, `album`, `genre`, `venue`, `date` and `artwork`.
 Each `[[tracks]]` row has `source`, `destination`, `title`, `disc` and `track`.
 Disc and track values display `number/total`, such as `"1/2"` and `"7/18"`.
-Totals must match the recorded set/track inventory. FLAC tags store combined
-`TRACKNUMBER` and `DISCNUMBER` values; no separate total fields are written.
+Valid existing FLAC track/disc values seed the preview, including partial-show
+totals such as `1/2`. Otherwise notes supply defaults. Approved positive
+number/total pairs are applied exactly; totals can exceed the local inventory
+and track numbers need not be consecutive. The number cannot exceed its total.
+FLAC tags store combined `TRACKNUMBER` and `DISCNUMBER` values; legacy separate
+total fields are removed during retagging. Filename and tag numbering are
+independent editable fields; changing one does not silently change the other.
 Genre is optional; a saved per-collection Genre seeds future preparation. An
 approved Genre is saved even with `-p` when a collection mapping exists. A
 single JPG seeds artwork; otherwise choose an existing JPG or leave empty.
@@ -71,21 +76,24 @@ subframes disabled, LPC order zero and mid-side disabled. This produces
 verbatim subframes; it is not compression level `-0`. Existing FLAC audio is
 copied for staging rather than re-encoded.
 
-The resulting tag set contains exactly these sample fields:
+These managed fields use the approved preparation values:
 
 | Tag | Value |
 | --- | --- |
-| `artist` | Approved artist |
-| `album` | Approved Album |
-| `genre` | Approved Genre |
-| `venue` | Approved venue |
-| `date` | Year only, from the approved ISO date |
-| `title` | Approved track title |
-| `tracknumber` | Global track number / total recorded tracks, e.g. `7/18` |
-| `discnumber` | Set number / highest recorded set number, e.g. `2/2` |
+| `ARTIST` | Approved artist |
+| `ALBUM` | Approved Album |
+| `GENRE` | Approved Genre |
+| `VENUE` | Approved venue |
+| `DATE` | Year only, from the approved ISO date |
+| `Title` | Approved track title |
+| `TRACKNUMBER` | Approved track number/total, e.g. `7/18` |
+| `DISCNUMBER` | Approved disc number/total, e.g. `1/2` |
 
-Other tags and pictures are removed when tagging is needed. Selected artwork is
-embedded as one JPEG front cover; empty artwork removes embedded pictures. Tag
+Other existing FLAC tags, including multi-value custom fields, are preserved
+and do not prevent no-op detection. Existing unmanaged tag casing is retained;
+new or explicitly edited custom fields use uppercase names. Genre is managed:
+a blank Genre removes it. Selected artwork replaces embedded pictures with one
+JPEG front cover; empty artwork removes embedded pictures. Tag
 writes use a modest 1024-byte padding allowance. Already matching tags and
 artwork avoid rewriting the staged FLAC. When names, tags, artwork and manifest
 bytes already match, preparation leaves local outputs unchanged.
@@ -104,6 +112,27 @@ and artwork already match, changed notes or stale/missing manifests take a
 manifest-only path: no audio staging, tagging, encoding or PCM decoding. Only
 changed manifests are replaced; an unchanged FFP retains its timestamp. You do
 not need to delete an old MD5 before rerunning preparation.
+
+## Optional custom tags
+
+Add an optional `[tags]` table to set common custom fields. A `[tracks.tags]`
+table inside a `[[tracks]]` row overrides those values for that track. Fields
+accept text or lists of text; `""` or `[]` explicitly removes a custom field.
+All other existing FLAC fields are preserved. Use the normal preparation
+fields for managed tags; duplicate case-insensitive custom names are rejected.
+These optional tables do not appear in the default preview.
+
+```toml
+[tags]
+COMPOSER = ["Composer A", "Composer B"]
+COMMENT = ""
+BPM = "120"
+```
+
+Place a common table after the common fields and before the first `[[tracks]]`
+row. Per-track tables go after the fields of their corresponding track row.
+WAV conversion does not automatically translate arbitrary WAV/ID3 metadata;
+use custom tables to supply those fields on newly converted FLACs.
 
 ## Existing-file manifests
 

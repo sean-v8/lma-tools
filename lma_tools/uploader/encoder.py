@@ -21,6 +21,7 @@ def pcm_digest(path):
     """Hash signed 32-bit interleaved PCM without buffering a whole show."""
     command = [
         "ffmpeg",
+        "-nostdin",
         "-v",
         "error",
         "-i",
@@ -34,7 +35,9 @@ def pcm_digest(path):
         "-",
     ]
     digest = hashlib.sha256()
-    with subprocess.Popen(command, stdout=subprocess.PIPE) as process:
+    with subprocess.Popen(
+        command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE
+    ) as process:
         while chunk := process.stdout.read(1024 * 1024):
             digest.update(chunk)
         if process.wait():
@@ -134,17 +137,63 @@ def _encode_progress(command, source, progress):
             raise
 
 
+MANAGED_TAGS = {
+    "artist",
+    "album",
+    "genre",
+    "venue",
+    "date",
+    "title",
+    "tracknumber",
+    "discnumber",
+}
+LEGACY_TOTALS = {"totaltracks", "totaldiscs", "tracktotal", "disctotal"}
+
+
+def number_tag(value, total):
+    """Keep an approved number/total instead of recomputing its denominator."""
+    return value if isinstance(value, str) else f"{value}/{total}"
+
+
+def expected_tags(common, track, totaltracks, totaldiscs):
+    """Managed fields plus explicit common/per-track custom tag overrides."""
+    expected = {
+        key: [common[key][:4] if key == "date" else common[key]]
+        for key in ("artist", "album", "venue", "date")
+    }
+    expected.update(
+        genre=[common["genre"]] if common.get("genre", "").strip() else [],
+        title=[track["title"]],
+        tracknumber=[number_tag(track["track"], totaltracks)],
+        discnumber=[number_tag(track["disc"], totaldiscs)],
+    )
+    for tags in (common.get("tags", {}), track.get("tags", {})):
+        for key, value in tags.items():
+            key = key.lower()
+            if key in MANAGED_TAGS | LEGACY_TOTALS:
+                raise ValueError("Use the preview field for managed tags.")
+            expected[key] = (
+                [value]
+                if isinstance(value, str) and value
+                else []
+                if isinstance(value, str)
+                else value
+            )
+    return expected
+
+
 def tag_audio(path, common, track, totaltracks, totaldiscs, artwork=None):
-    """Replace tags and artwork, retaining only the approved sample fields."""
+    """Update approved fields, preserving unmanaged FLAC comments."""
     audio = FLAC(path)
-    audio.clear()
-    for key in ("artist", "album", "genre", "venue", "date"):
-        if key != "genre" or common.get("genre", "").strip():
-            value = common[key][:4] if key == "date" else common[key]
-            audio[key] = [value]
-    audio["title"] = [track["title"]]
-    audio["tracknumber"] = [f"{track['track']}/{totaltracks}"]
-    audio["discnumber"] = [f"{track['disc']}/{totaldiscs}"]
+    for key in LEGACY_TOTALS:
+        audio.pop(key, None)
+    for key, values in expected_tags(
+        common, track, totaltracks, totaldiscs
+    ).items():
+        if values:
+            audio["Title" if key == "title" else key.upper()] = values
+        else:
+            audio.pop(key, None)
     audio.clear_pictures()
     if artwork:
         picture = Picture()
@@ -178,20 +227,13 @@ def tag_audio(path, common, track, totaltracks, totaldiscs, artwork=None):
 def tags_match(path, common, track, totaltracks, totaldiscs, artwork=None):
     """Compare approved tags and single artwork without changing the file."""
     audio = FLAC(path)
-    expected = {
-        key: [common[key][:4] if key == "date" else common[key]]
-        for key in ("artist", "album", "genre", "venue", "date")
-        if key != "genre" or common.get("genre", "").strip()
-    }
-    expected.update(
-        {
-            "title": [track["title"]],
-            "tracknumber": [f"{track['track']}/{totaltracks}"],
-            "discnumber": [f"{track['disc']}/{totaldiscs}"],
-        }
-    )
-    if dict(audio.tags or {}) != expected:
+    if any(key in audio for key in LEGACY_TOTALS):
         return False
+    for key, values in expected_tags(
+        common, track, totaltracks, totaldiscs
+    ).items():
+        if audio.get(key, []) != values:
+            return False
     if not artwork:
         return not audio.pictures
     return (

@@ -115,11 +115,13 @@ class PrepareTests(unittest.TestCase):
         approved = validate_plan(review_text(plan), self.show)
         self.assertEqual(approved, plan)
         for field in ("disc", "track"):
-            with self.subTest(field=field), self.assertRaises(ValueError):
+            with self.subTest(field=field):
                 text = review_text(plan).replace(
                     f'{field} = "1/1"', f'{field} = "1/2"'
                 )
-                validate_plan(text, self.show)
+                approved = validate_plan(text, self.show)
+                self.assertEqual(approved["tracks"][0][field], "1/2")
+                self.assertIn(f'{field} = "1/2"', review_text(approved))
 
     def test_preview_shows_multiset_and_partial_set_totals(self):
         import tomllib
