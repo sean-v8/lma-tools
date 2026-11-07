@@ -125,7 +125,11 @@ def is_output(path):
         return False
     try:
         show_identity(path.name)
-        suffixes = {p.suffix.lower() for p in path.iterdir() if p.is_file()}
+        suffixes = {
+            p.suffix.lower()
+            for p in path.iterdir()
+            if p.is_file() and p.name.casefold() != "sync.txt"
+        }
         return ".txt" in suffixes and bool({".wav", ".flac"} & suffixes)
     except (OSError, ValueError):
         return False

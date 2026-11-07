@@ -243,6 +243,7 @@ class ProgressBoard:
         self.separator = None
         if self.sizes is not None and self.enabled:
             with self.lock:
+                print(file=self.stream, flush=True)
                 self.total = OrderedProgress(
                     total=sum(self.sizes.values()),
                     desc="TOTAL",
@@ -311,7 +312,11 @@ class ProgressBoard:
     def message(self, text, **kwargs):
         with self.lock:
             if self.enabled:
-                UploadProgress.write(str(text), file=self.stream)
+                UploadProgress.write(
+                    str(text),
+                    file=self.stream,
+                    end="\n\n" if self.total is not None else "\n",
+                )
             else:
                 print(text, file=self.stream, flush=True)
 

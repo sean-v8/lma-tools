@@ -58,7 +58,9 @@ class PreparationProgress:
     def track(self, index, name):
         with self.lock:
             slot = heapq.heappop(self.slots)
-            bar = self._bar(f"[{index}/{self.count}] Preparing {name}", slot)
+            width = len(str(self.count))
+            label = f"[{index:>{width}}/{self.count}] Preparing {name}"
+            bar = self._bar(label, slot)
         try:
 
             def update(percent, phase="Converting"):
