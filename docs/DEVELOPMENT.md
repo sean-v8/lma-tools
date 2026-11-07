@@ -17,7 +17,7 @@ environment override, the editable checkout, then the XDG location. Private
 config, credentials, recordings and logs must stay out of Git.
 
 Named preference tables live in `[upload.collections.PREFIX]`, with
-`collection`, optional `creator` and optional `genre`. Legacy strings work.
+`collection`, optional `creator` and optional `genre`.
 Collection tables are saved after basic upload and report settings. The TOML
 writer keeps comments and unrelated settings, locks the config directory and
 replaces the file atomically. Tests cover concurrent writers and failed
@@ -69,7 +69,7 @@ need to reach its socket timeout.
 Remote whole-file MD5 and size establish a verified skip or recovery success.
 Preflight HEAD checks also recognize completed files absent from an inventory
 response. Known conflicts require `r`/`a` approval or cancellation before
-workers start. Choosing `a` still skips matching files; legacy `--force`
+workers start. Choosing `a` still skips matching files; `--force`
 uploads all. Explicit `--trust-log` can accept a matching prior server
 acknowledgement when remote checks are inconclusive; it cannot override a known
 conflict.
@@ -209,22 +209,24 @@ within HTTP 200, redirects, cancellation and final derive ordering. Other
 checks cover config writes, caches, completion and installed command behavior.
 Pseudo-terminal checks cover display ordering, alignment and resizing.
 
-These checks do not perform live Archive uploads. Automated tmux checks use
-mocks for launching, quoting, environment forwarding and session isolation;
-they do not reproduce an SSH disconnect/reconnect. Users report successful end-
-to-end Archive uploads, including multipart assembly. Our automated network
-tests are mocked, not independent live verification. Resume is already enabled
-by default; no new live upload was performed for these docs.
+These checks do not perform live Archive uploads. Network tests use controlled
+responses, while encoding tests invoke local `flac` and FFmpeg binaries.
+Automated tmux checks cover launching, quoting, environment forwarding and
+session isolation; they do not reproduce an SSH disconnect/reconnect.
+
 Run `uv run --locked python -B -m tests` for a passed-test progress bar. Test
 stdout/stderr is buffered; only failure tracebacks and their captured output
 are shown. Skipped and expected-failure tests are identified separately. The
 runner returns nonzero for failures, errors or unexpected successes. Standard
 `unittest discover` remains available for debugging individual tests.
 
+Test modules are grouped by behavior: metadata, discovery, runtime, transfers,
+preparation, tags, progress, recovery and reporting. Shared fixtures live in
+`tests/helpers.py` and `tests/upload/helpers.py`; test modules should not
+import
+other test modules for fixtures. Keep distinct failure-path cases even when
+they share setup. Consolidate repeated setup and duplicate assertions instead
+of targeting a particular test count.
+
 The upload/report modules are `lma_tools.upload` and `lma_tools.report`.
-Installed commands are `lma-upload`/`lmau` and `lma-report`/`lmar`. Legacy
-config headers are resolved read-only by the shared config layer. Explicit
-migration
-renames those tables with comment-preserving TOML and retains a private backup.
-The install script removes former uv-managed report entry points only after
-successful installation; it does not remove arbitrary PATH executables.
+Installed commands are `lma-upload`/`lmau` and `lma-report`/`lmar`.

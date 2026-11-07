@@ -29,6 +29,11 @@ def comparison(remote, proposed):
     lines = ["# Changes from current Archive metadata (- remote, + proposed):"]
     for key, value in proposed.items():
         old = remote.get(key)
+        if key == "collection":
+            memberships = old if isinstance(old, list) else [old]
+            if value in memberships:
+                continue
+            lines.append("# Collection is protected; a mismatch stops upload.")
         if isinstance(old, list) and len(old) == 1:
             old = old[0]
         if key == "description" and isinstance(old, str):

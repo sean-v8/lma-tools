@@ -72,6 +72,9 @@ from .remote import (
 def transport_metadata(metadata):
     """Encode reviewed plain text for Archive's HTML description field."""
     payload = dict(metadata)
+    collection = payload.get("collection")
+    if payload.get("mediatype") == "etree" and isinstance(collection, str):
+        payload["collection"] = list(dict.fromkeys([collection, "etree"]))
     if "description" in payload:
         payload["description"] = html.escape(
             payload["description"], quote=False

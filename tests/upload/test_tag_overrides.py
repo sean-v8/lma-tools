@@ -1,10 +1,8 @@
-"""Preserve custom FLAC tags and apply explicit preview values exactly."""
+"""Tag preservation, explicit overrides and shared disc totals."""
 
 import shutil
-import subprocess
-import tempfile
 import unittest
-from pathlib import Path
+from unittest import TestCase, skipUnless
 from unittest.mock import patch
 
 from mutagen.flac import FLAC
@@ -17,51 +15,12 @@ from lma_tools.upload.prepare import (
     validate_manifests,
     validate_plan,
 )
+from tests.upload.helpers import set_up_tagged_show
 
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg required")
 class TagOverrideTests(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        self.show = self.root / "artist2026-11-07"
-        self.show.mkdir()
-        self.path = self.show / "artist2026-11-07s1t01.flac"
-        self.notes = self.show / "notes.txt"
-        self.notes.write_text(
-            "Artist\nNovember 07, 2026\nVenue\nCity\n\nSet 1\n01. Song\n"
-        )
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-v",
-                "error",
-                "-f",
-                "lavfi",
-                "-i",
-                "anullsrc=r=48000:cl=stereo",
-                "-t",
-                "0.01",
-                str(self.path),
-            ],
-            check=True,
-            capture_output=True,
-        )
-        self.common = dict(
-            artist="Artist",
-            album="Album",
-            genre="Jazz",
-            venue="Venue",
-            date="2026-11-07",
-        )
-        self.track = dict(title="Song", track=1, disc="1/2")
-        tag_audio(self.path, self.common, self.track, 1, 1)
-        audio = FLAC(self.path)
-        audio["Composer"] = ["Composer A", "Composer B"]
-        audio["COMMENT"] = ["Keep this comment"]
-        audio["BPM"] = ["120"]
-        audio.save()
+    setUp = set_up_tagged_show
 
     def test_unmanaged_fields_do_not_trigger_rewrite_or_pcm_checks(self):
         plan = build_plan(self.show, {})
@@ -227,7 +186,7 @@ class TagOverrideTests(unittest.TestCase):
             (self.path.read_bytes(), self.path.stat().st_mtime_ns), before
         )
 
-    def test_bare_numbers_are_rejected_in_review_before_any_writes(self):
+    def test_invalid_disc_and_bare_track_numbers_are_rejected(self):
         for field in ("disc", "track"):
             with self.subTest(field=field):
                 plan = build_plan(self.show, {})
@@ -236,3 +195,57 @@ class TagOverrideTests(unittest.TestCase):
                 text = text.replace(f"{field} = {original}", f"{field} = 7")
                 with self.assertRaises(ValueError):
                     validate_plan(text, self.show)
+
+
+@skipUnless(shutil.which("ffmpeg"), "ffmpeg required")
+class DiscTotalTests(TestCase):
+    setUp = set_up_tagged_show
+
+    def test_one_edit_updates_discnumber_without_extra_total_tags(self):
+        plan = build_plan(self.show, {})
+        self.assertEqual(plan["disc_total"], 2)
+        text = review_text(plan).replace("disc_total = 2", "disc_total = 4")
+        approved = validate_plan(text, self.show)
+        apply_plan(self.show, approved)
+        audio = FLAC(self.path)
+        self.assertEqual(audio["discnumber"], ["1/4"])
+        self.assertNotIn("disc_total", audio)
+        self.assertNotIn("totaldiscs", audio)
+        again = build_plan(self.show, {})
+        self.assertEqual(again["disc_total"], 4)
+        before = self.path.read_bytes(), self.path.stat().st_mtime_ns
+        apply_plan(self.show, again)
+        self.assertEqual(
+            (self.path.read_bytes(), self.path.stat().st_mtime_ns), before
+        )
+
+    def test_explicit_pair_overrides_shared_total(self):
+        plan = build_plan(self.show, {})
+        plan["disc_total"] = 3
+        plan["tracks"][0]["disc"] = "1/5"
+        approved = validate_plan(review_text(plan), self.show)
+        self.assertEqual(approved["tracks"][0]["disc"], "1/5")
+        apply_plan(self.show, approved)
+        self.assertEqual(FLAC(self.path)["discnumber"], ["1/5"])
+
+    def test_invalid_shared_totals_rejected(self):
+        for value in (0, -1, True, "2"):
+            with self.subTest(value=value):
+                plan = build_plan(self.show, {})
+                plan["disc_total"] = value
+                with self.assertRaises(ValueError):
+                    validate_plan(review_text(plan), self.show)
+
+    def test_shared_total_applies_to_every_set(self):
+        other = self.show / "artist2026-11-07s2t01.flac"
+        shutil.copy2(self.path, other)
+        self.notes.write_text(self.notes.read_text() + "Set 2\n01. Song\n")
+        audio = FLAC(other)
+        audio["DISCNUMBER"] = "2/2"
+        audio.save()
+        plan = build_plan(self.show, {})
+        plan["disc_total"] = 4
+        approved = validate_plan(review_text(plan), self.show)
+        apply_plan(self.show, approved)
+        self.assertEqual(FLAC(self.path)["discnumber"], ["1/4"])
+        self.assertEqual(FLAC(other)["discnumber"], ["2/4"])

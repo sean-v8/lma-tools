@@ -8,7 +8,7 @@ from lma_tools.report.client import ArchiveError
 from lma_tools.report.config import Config
 from lma_tools.report.service import SearchService
 from lma_tools.report.ui import interactive
-from tests.report.test_terminal import TtyBuffer
+from tests.helpers import TtyBuffer
 
 
 class CacheRecoveryTests(unittest.TestCase):

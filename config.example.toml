@@ -30,6 +30,3 @@ exclude_zero_views = true
 collection = "ArchiveCollection"
 creator = "Example Artist"
 genre = "Rock"
-
-# Legacy strings under [upload.collections] are also supported:
-# band = "ArchiveCollection"

@@ -1,4 +1,4 @@
-"""Mapping writes preserve private config and require approved workflows."""
+"""Collection preferences, atomic writes and config conversion."""
 
 import io
 import stat
@@ -10,8 +10,13 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from lma_tools.upload.collections import load_csv, save_collection, validate
-from tests.test_integration import migration
+from lma_tools.upload.collections import (
+    get_preference,
+    load_csv,
+    save_collection,
+    validate,
+)
+from tests.helpers import migration
 
 
 class CollectionTests(unittest.TestCase):
@@ -126,3 +131,52 @@ class CollectionTests(unittest.TestCase):
             path.write_text("band,One\nband,Two\n")
             with self.assertRaisesRegex(ValueError, "Conflicting"):
                 load_csv(path)
+
+
+class PreferenceTests(unittest.TestCase):
+    def test_string_and_named_collection_entries(self):
+        config = {
+            "collections": {
+                "old": "Old",
+                "new": {
+                    "collection": "New",
+                    "creator": "Artist",
+                    "genre": "Jazz",
+                },
+            }
+        }
+        validate(config["collections"])
+        self.assertEqual(get_preference(config, "old"), {"collection": "Old"})
+        self.assertEqual(get_preference(config, "new")["genre"], "Jazz")
+        self.assertEqual(get_preference(config, "missing"), {})
+        for value in ({"creator": "A"}, {"collection": "X", "genre": 3}):
+            with self.assertRaises(ValueError):
+                validate({"bad": value})
+
+    def test_preferences_at_end_preserve_other_sections_and_comments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text(
+                '# private\n[upload]\nshows_root="/shows"\n'
+                '[upload.collections]\nband="Collection" # retained\n'
+                '[report]\nsort="views" # sorting\n'
+            )
+            save_collection(path, "band", "Collection", creator="Artist")
+            save_collection(path, "band", "Collection", genre="Jazz")
+            text = path.read_text()
+            data = tomllib.loads(text)
+            self.assertEqual(
+                data["upload"]["collections"]["band"],
+                {
+                    "collection": "Collection",
+                    "creator": "Artist",
+                    "genre": "Jazz",
+                },
+            )
+            self.assertEqual(data["report"], {"sort": "views"})
+            self.assertLess(
+                text.index("[report]"),
+                text.index("[upload.collections.band]"),
+            )
+            self.assertIn("# private", text)
+            self.assertIn("# sorting", text)

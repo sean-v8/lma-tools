@@ -13,7 +13,7 @@ from lma_tools.config import SECTION_NAMES, section_key
 
 
 def preference(value):
-    """Normalize legacy names and named per-prefix preferences."""
+    """Normalize a collection name or per-prefix preference table."""
     if isinstance(value, str) and value.strip():
         return {"collection": value}
     if not isinstance(value, dict) or set(value) - {
@@ -48,7 +48,7 @@ def get_preference(config, prefix):
 
 
 def load_csv(path):
-    """Read legacy data for explicit migration or a CLI override."""
+    """Read and validate a two-column prefix/collection CSV."""
     with Path(path).open(newline="", encoding="utf-8-sig") as handle:
         values = {}
         for number, row in enumerate(csv.reader(handle), 1):

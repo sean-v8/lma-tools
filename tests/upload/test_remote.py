@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from lma_tools.upload import cli
 from lma_tools.upload.remote import delete_originals, review_remote
-from tests.upload.test_lma import ID, response
+from tests.upload.helpers import ID, response
 
 
 class RemoteReviewTests(unittest.TestCase):

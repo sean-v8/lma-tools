@@ -22,7 +22,7 @@ SECTION_NAMES = set(SECTION_ALIASES) | set(SECTION_ALIASES.values())
 
 
 def section_key(data, section):
-    """Read old private config headers without rewriting their contents."""
+    """Resolve a tool section and reject conflicting definitions."""
     for current, legacy in SECTION_ALIASES.items():
         if current in data and legacy in data:
             raise ValueError(f"Use only [{current}] or [{legacy}], not both.")
@@ -43,5 +43,4 @@ def read_section(path, section):
         data = data[key] if key else {}
         if not isinstance(data, dict):
             raise ValueError(f"[{section}] must be a TOML table")
-    # Flat files remain accepted for explicit legacy configs.
     return data

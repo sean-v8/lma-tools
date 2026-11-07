@@ -62,7 +62,7 @@ recording, edit the shared total if more sets occurred than were recorded.
 Approved positive number/total pairs are applied exactly; totals can exceed
 the local inventory and track numbers need not be consecutive. The number
 cannot exceed its total. FLAC tags store combined `TRACKNUMBER` and
-`DISCNUMBER` values; legacy separate total fields are removed during retagging.
+`DISCNUMBER` values; separate total fields are removed during retagging.
 Filename and tag numbering are independent editable fields; changing one does
 not silently change the other.
 Genre is optional; a saved per-collection Genre seeds future preparation. An
@@ -157,13 +157,13 @@ invalid manifests without changing them.
 
 Before workers start, differing same-name files show local and remote sizes and
 MD5s. Choose `r` to replace one, `a` for all conflicts, or `c` to cancel.
-Choosing `a` still skips matching files. `--force` retains the legacy behavior
-of uploading all selected files, including matches; it is not that prompt's
-replace-all-conflicts choice.
+Choosing `a` still skips matching files. `--force` uploads all selected files,
+including matches; it is not the prompt's replace-all-conflicts choice.
 
 Normal existing-item uploads offer remote extras for cleanup by default. Only
 direct supported TXT/JPG/FFP/MD5/FLAC originals with MD5 and size evidence are
 candidates. Derivatives, nested files and unknown originals are excluded.
+Archive's reserved `__ia_thumb.jpg` is excluded even if marked original.
 Nothing is selected initially. Enter numbers separated by spaces or `all`, then
 type `DELETE`; Enter alone selects none. `--clean` uses this same review
 without uploads, replacement prompts or local preparation. A partial folder can

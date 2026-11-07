@@ -9,11 +9,7 @@ from lma_tools.report.config import Config
 from lma_tools.report.service import SearchService
 from lma_tools.report.terminal import FetchDisplay
 from lma_tools.report.ui import HELP, interactive
-
-
-class TtyBuffer(io.StringIO):
-    def isatty(self):
-        return True
+from tests.helpers import TtyBuffer
 
 
 class TerminalTests(unittest.TestCase):

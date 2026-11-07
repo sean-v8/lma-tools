@@ -1,15 +1,18 @@
-"""Real reference encoding and decoded PCM tests."""
+"""Reference encoding, PCM verification and terminal isolation."""
 
+import hashlib
+import io
 import shutil
 import subprocess
 import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from mutagen.flac import FLAC
 
-from lma_tools.upload.encoder import encode_verbatim, verify_pcm
+from lma_tools.upload.encoder import encode_verbatim, pcm_digest, verify_pcm
 
 
 @unittest.skipUnless(shutil.which("flac"), "reference flac required")
@@ -56,3 +59,20 @@ class EncoderTests(unittest.TestCase):
             self.assertTrue(all("type=VERBATIM" in row for row in rows))
             with self.assertRaises(FileExistsError):
                 encode_verbatim(source, target)
+
+
+class EncoderStdinTests(unittest.TestCase):
+    def test_pcm_verification_disables_interactive_input(self):
+        process = Mock()
+        process.stdout = io.BytesIO(b"decoded pcm")
+        process.wait.return_value = 0
+        manager = Mock()
+        manager.__enter__ = Mock(return_value=process)
+        manager.__exit__ = Mock(return_value=False)
+        with patch(
+            "lma_tools.upload.encoder.subprocess.Popen", return_value=manager
+        ) as start:
+            digest = pcm_digest("track.flac")
+        self.assertIn("-nostdin", start.call_args.args[0])
+        self.assertEqual(start.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertEqual(digest, hashlib.sha256(b"decoded pcm").hexdigest())

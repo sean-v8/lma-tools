@@ -49,7 +49,7 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(plan["genre"], "Jazz")
         self.assertEqual(self.source.stat().st_mtime_ns, before)
 
-    def test_single_set_omits_set_prefix_and_accepts_legacy_names(self):
+    def test_single_set_omits_set_prefix_and_accepts_explicit_set_one(self):
         for name in ("test2026-11-06t01.wav", "test2026-11-06s1t01.wav"):
             with self.subTest(name=name):
                 source = self.source.rename(self.show / name)

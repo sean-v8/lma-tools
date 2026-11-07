@@ -13,7 +13,7 @@ from lma_tools.config import read_section
 from lma_tools.report.config import load_config
 from lma_tools.upload import cli
 from lma_tools.upload.collections import save_collection
-from tests.test_integration import migration
+from tests.helpers import migration
 
 ROOT = Path(__file__).resolve().parents[1]
 

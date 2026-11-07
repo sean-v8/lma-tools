@@ -8,7 +8,7 @@ from unittest.mock import Mock
 from requests import HTTPError
 
 from lma_tools.upload.derivation import queue_final_derive
-from tests.upload.test_lma import response
+from tests.upload.helpers import response
 
 
 class DerivationTests(unittest.TestCase):

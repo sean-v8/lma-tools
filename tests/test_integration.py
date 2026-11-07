@@ -1,6 +1,5 @@
 """Shared config, migration and installed-launcher regression coverage."""
 
-import importlib.util
 import io
 import os
 import shlex
@@ -14,13 +13,9 @@ from unittest.mock import Mock, patch
 from lma_tools.config import config_path
 from lma_tools.report.config import load_config
 from lma_tools.upload import cli, launcher
+from tests.helpers import migration
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location(
-    "migration", ROOT / "scripts/migrate_config.py"
-)
-migration = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(migration)
 
 
 class IntegrationTests(unittest.TestCase):

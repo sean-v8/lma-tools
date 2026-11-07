@@ -19,7 +19,7 @@ from lma_tools.upload.recovery import (
     retryable,
     upload_with_recovery,
 )
-from tests.upload.test_lma import ID, make_show, response
+from tests.upload.helpers import ID, make_show, response
 
 POLICY = RecoveryPolicy(retries=1, checks=2, delay=1, max_delay=2)
 

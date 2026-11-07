@@ -41,24 +41,11 @@ The installer uses locked dependencies and creates `lma-upload` / `lmau`,
 checkout in place: installation is editable. No aliases are required. If the
 commands are not on PATH, run `uv tool update-shell` and open a new terminal.
 
-## Updating older installations
+## Updating
 
-Run `bash scripts/install.sh` again after updating the source. Reinstalling
-lma-tools replaces its former `lmav` entry point with `lmar`; the installer
-also removes a separately uv-installed legacy lma-views package. Run
-`hash -r` in existing shells to clear cached executable paths.
-
-Old `[uploader]` and `[views]` config headers remain readable without changing
-your private file. To migrate headers to `[upload]` and `[report]` while
-retaining values and comments, run:
-
-```bash
-uv run --locked python scripts/migrate_config.py --upgrade config.toml
-```
-
-The migration keeps an exclusive private backup and never overwrites one.
-Collection preference blocks remain at the end. Conflicting old/new headers
-are rejected instead of silently merging different settings.
+Update the source checkout, then run `bash scripts/install.sh` again. Keep
+`config.toml` in place; source updates should not replace private settings.
+Run `hash -r` in existing shells after reinstalling commands.
 
 ## Configuration
 
@@ -92,8 +79,8 @@ prefixes with Archive collection names; approved mappings are saved here
 without changing unrelated settings or comments. See
 [config.example.toml](config.example.toml) for optional defaults, including
 upload recovery settings. Keep basic upload and report settings above the
-collection tables at the end. Legacy string mappings remain supported. Approved
-Creator preferences avoid repeated naming-history lookups; approved Genre is
+collection tables at the end. Approved Creator preferences avoid repeated
+naming-history lookups; approved Genre is
 saved by preparation, including `-p`, for an existing mapping.
 
 Both commands select config independently of the current directory:
@@ -179,8 +166,8 @@ Select numbers or `all`, then type `DELETE` to approve deletion. Use
 `--no-clean` to omit that review, or standalone `--clean` for cleanup without
 preparation, audio changes, file uploads or item metadata mutation. Conflicting
 files offer replace (`r`), replace all conflicts (`a`) or cancel (`c`).
-Matching files still skip after `a`. `--force` retains its legacy upload-all
-behavior, including matching files.
+Matching files still skip after `a`. `--force` uploads all selected files,
+including matching files.
 
 Corrected uploads must be remotely checksum-verified before approved extras are
 deleted. Deletes do not cascade. Accepted deletion is not finalized; bounded
@@ -195,14 +182,16 @@ safeguards and edge cases.
 
 `--preview` prints the plan without network access, an editor or writes.
 Metadata review uses Ctrl-S to accept and Ctrl-C to cancel; execution requires
-typing `UPLOAD`. Existing-item metadata is updated before file transfers. When
-no saved Creator applies, new items use recent collection naming before the
-interactive review. It prefers the account email from `ia configure`, or
-matches the transferer name when that email is unavailable. Up to three recent
-personal uploads are checked first, then up to three other uploads if needed.
-A majority of at least two matching Creator/Title patterns seeds those fields
-with this show's venue and date. Conflicts, unfamiliar title formats and failed
-lookups leave local naming in place. A comment identifies the suggestion.
+typing `UPLOAD`. Existing-item metadata is updated before file transfers. New
+items request both the selected artist collection and `etree`; existing
+collection memberships are not rewritten. When no saved Creator applies, new
+items use recent collection naming before the interactive review. It prefers
+the account email from `ia configure`, or matches the transferer name when that
+email is unavailable. Up to three recent personal uploads are checked first,
+then up to three other uploads if needed. A majority of at least two matching
+Creator/Title patterns seeds those fields with this show's venue and date.
+Conflicts, unfamiliar title formats and failed lookups leave local naming in
+place. A comment identifies the suggestion.
 
 Each ordinary run rebuilds TXT-derived metadata from the current notes. Saved
 collection Creator preferences take precedence over the TXT artist for item
