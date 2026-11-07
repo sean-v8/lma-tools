@@ -27,6 +27,7 @@ def original(entry):
     return (
         entry.get("source") == "original"
         and isinstance(name, str)
+        and name.casefold() != "__ia_thumb.jpg"
         and PurePosixPath(name).name == name
         and PurePosixPath(name).suffix.lower() in SUPPORTED
         and not name.startswith(".")

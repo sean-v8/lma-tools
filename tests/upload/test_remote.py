@@ -64,6 +64,7 @@ class RemoteReviewTests(unittest.TestCase):
                 derivative,
                 self.entry("item_meta.xml"),
                 self.entry("../outside.flac"),
+                self.entry("__ia_thumb.jpg"),
                 self.entry("cover_thumb.jpg"),
             ]
         )
