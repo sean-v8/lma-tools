@@ -245,6 +245,17 @@ def build_plan(directory, config_entry, notes=None):
             value = _existing_number(audio, key)
             if value and value != f"{track[field]}/{total}":
                 track[field] = value
+    totals = {
+        _number_pair(track["disc"])[1]
+        for track in tracks
+        if _number_pair(track["disc"])
+    }
+    disc_total = totals.pop() if len(totals) == 1 else inferred_discs
+    disc_total = max(disc_total, max(_number(t["disc"]) for t in tracks))
+    for track in tracks:
+        pair = _number_pair(track["disc"])
+        if pair and pair[1] == disc_total:
+            track["disc"] = pair[0]
     artwork = sorted(directory.glob("*.jpg"))
     return dict(
         artist=artist,
@@ -253,6 +264,7 @@ def build_plan(directory, config_entry, notes=None):
         venue=venue,
         date=show_date,
         artwork=artwork[0].name if len(artwork) == 1 else "",
+        disc_total=disc_total,
         tracks=tracks,
         redundant_wavs=redundant_wavs,
     )
@@ -300,6 +312,10 @@ def _review_tags(lines, tags, table):
 def review_text(plan):
     """Render editable TOML without creating a review file."""
     lines = ["# Ctrl-S accepts; Ctrl-C cancels."]
+    if "disc_total" in plan:
+        lines.append(
+            "# Integer discs inherit disc_total; n/total overrides one track."
+        )
     for key, value in plan.items():
         if key not in {"tracks", "redundant_wavs", "tags"}:
             lines.append(f"{key} = {json.dumps(value, ensure_ascii=False)}")
@@ -324,7 +340,7 @@ def review_text(plan):
                 if key == "tags":
                     continue
                 if table == "tracks" and type(value) is int:
-                    if key == "disc":
+                    if key == "disc" and "disc_total" not in plan:
                         value = f"{value}/{disc_total}"
                     elif key == "track":
                         value = f"{value}/{len(plan['tracks'])}"
@@ -374,7 +390,11 @@ def validate_plan(text, directory):
     plan.setdefault("redundant_wavs", [])
     if "tags" in plan:
         _validate_custom_tags(plan["tags"])
-    if set(plan) - {"tags"} != {
+    if "disc_total" in plan and (
+        type(plan["disc_total"]) is not int or plan["disc_total"] < 1
+    ):
+        raise ValueError("disc_total must be a positive integer.")
+    if set(plan) - {"tags", "disc_total"} != {
         "artist",
         "album",
         "genre",
@@ -411,7 +431,12 @@ def validate_plan(text, directory):
             _validate_custom_tags(track["tags"])
         for field in ("disc", "track"):
             value = track[field]
-            pair = _number_pair(value)
+            if field == "disc" and type(value) is int and "disc_total" in plan:
+                if value < 1 or value > plan["disc_total"]:
+                    raise ValueError("Disc must be between 1 and disc_total.")
+                pair = value, plan["disc_total"]
+            else:
+                pair = _number_pair(value)
             if pair is None:
                 raise ValueError(f"{field} must use number/total.")
             track[field] = pair[0]
@@ -442,7 +467,10 @@ def validate_plan(text, directory):
         discs.add(track["disc"])
     for track, field, value, total in displayed_totals:
         default = max(discs) if field == "disc" else len(tracks)
-        if total != default:
+        if field == "disc" and "disc_total" in plan:
+            if isinstance(value, str):
+                track[field] = value
+        elif total != default:
             track[field] = value
     redundant = plan["redundant_wavs"]
     if not isinstance(redundant, list):

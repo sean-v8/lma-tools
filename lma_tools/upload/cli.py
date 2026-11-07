@@ -289,14 +289,26 @@ def parse_review(text):
 
 def edit_review(identifier, metadata, *, history=True):
     from .history import suggest
+    from .metadata_review import comparison, snapshot
     from .ui import edit_document
 
-    note = "Saved review retained; history suggestions not reapplied."
-    if history:
+    remote = snapshot(identifier)
+    note = "Fresh TXT defaults; saved collection naming retained."
+    if history and remote == {}:
         print("Checking recent collection naming...", flush=True)
         metadata, note = suggest(identifier, metadata)
-    document = "# " + note + "\n" + review_text(identifier, metadata)
-    return edit_document(document, parse_review)
+    document = (
+        "# "
+        + note
+        + "\n"
+        + comparison(remote, metadata)
+        + review_text(identifier, metadata)
+    )
+    result = edit_document(document, parse_review)
+    if result[0] != identifier:
+        remote = snapshot(result[0])
+    print(comparison(remote, result[1]), end="")
+    return result
 
 
 class Journal:
@@ -851,7 +863,7 @@ def parser():
     p.add_argument(
         "--fresh-metadata",
         action="store_true",
-        help="ignore metadata from prior runs in project log",
+        help="drop saved extra metadata; TXT fields always refresh",
     )
     p.add_argument(
         "--reset-review",
@@ -948,19 +960,28 @@ def run_upload(args, directory, project, config):
             legacy_name = previous.pop("uploader", None)
             if legacy_name and "@" not in legacy_name:
                 previous.setdefault("transferer", legacy_name)
-            metadata.update(previous)
-            metadata.pop("setlist", None)
+            # TXT-derived fields are authoritative on every ordinary run.
+            # Retain only extra fields that have no local notes equivalent.
+            metadata.update(
+                {
+                    key: value
+                    for key, value in previous.items()
+                    if key not in metadata
+                    and key
+                    not in {"setlist", "runtime", "scanner", "collection"}
+                }
+            )
         collection = (
             args.collection
-            or metadata.get("collection")
             or get_preference(config, abbreviation).get("collection")
+            or (previous or {}).get("collection")
         )
         if not collection and not args.preview:
             collection = input(
                 f"Collection identifier for {abbreviation}: "
             ).strip()
         saved = get_preference(config, abbreviation)
-        if not previous and saved.get("creator"):
+        if saved.get("creator"):
             metadata["creator"] = saved["creator"]
             metadata["title"] = (
                 f"{saved['creator']} Live at {metadata['venue']} "
@@ -972,7 +993,7 @@ def run_upload(args, directory, project, config):
             identifier, metadata = edit_review(
                 identifier,
                 metadata,
-                history=not bool(previous or saved.get("creator")),
+                history=not bool(saved.get("creator")),
             )
             metadata["runtime"] = runtime
             journal = Journal(
@@ -1074,8 +1095,6 @@ def run_upload(args, directory, project, config):
             )
         if existed and not (args.upload or args.runtime or args.clean):
             fields = ["date", "collection", "mediatype"]
-            if not args.metadata:
-                fields += ["creator", "title"]
             for key in fields:
                 remote = item.metadata.get(key)
                 if metadata[key] not in (
@@ -1123,14 +1142,10 @@ def run_upload(args, directory, project, config):
             if existed and not args.upload:
                 protected = {
                     "identifier",
-                    "creator",
-                    "title",
                     "mediatype",
                     "collection",
                     "uploader",
                 }
-                if args.metadata:
-                    protected -= {"creator", "title"}
                 payload = {
                     key: value
                     for key, value in metadata.items()
@@ -1138,7 +1153,10 @@ def run_upload(args, directory, project, config):
                 }
                 print("Updating metadata before file transfers...", flush=True)
                 options = {"timeout": 60}
-                if args.metadata:
+                if any(
+                    metadata[key] != item.metadata.get(key)
+                    for key in ("creator", "title")
+                ):
                     options["expect"] = {
                         key: item.metadata[key]
                         for key in ("creator", "title")

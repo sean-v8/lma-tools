@@ -120,13 +120,14 @@ class MetadataFirstTests(TestCase):
             item.upload_file.assert_not_called()
             session.submit_task.assert_not_called()
 
-    def test_full_resume_still_protects_creator(self):
+    def test_full_resume_updates_creator_with_expectation(self):
         with self.fixture() as (_, item, session, args):
             item.metadata["creator"] = "Old artist"
-            with self.assertRaisesRegex(ValueError, "creation field creator"):
-                lma.main(args)
-            item.modify_metadata.assert_not_called()
-            item.upload_file.assert_not_called()
+            self.assertEqual(lma.main(args), 0)
+            call = item.modify_metadata.call_args
+            self.assertEqual(call.args[0]["creator"], "Artist")
+            self.assertEqual(call.kwargs["expect"], {"creator": "Old artist"})
+            item.upload_file.assert_called()
 
     def test_metadata_failure_prevents_uploads(self):
         with self.fixture() as (_, item, session, args):
@@ -188,5 +189,7 @@ class MetadataFirstTests(TestCase):
             self.assertEqual(lma.main(args + ["-m"]), 0)
             payload = item.modify_metadata.call_args.args[0]
             self.assertEqual(payload["transferer"], "Example Taper")
-            self.assertEqual(payload["source"], "Previous manual edit")
+            self.assertEqual(
+                payload["source"], lma.parse_notes(NOTES, ID)["source"]
+            )
             self.assertNotIn("uploader", payload)

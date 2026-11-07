@@ -109,7 +109,8 @@ class PrepareTests(unittest.TestCase):
 
         plan = build_plan(self.show, self.config)
         preview = tomllib.loads(review_text(plan))
-        self.assertEqual(preview["tracks"][0]["disc"], "1/1")
+        self.assertEqual(preview["tracks"][0]["disc"], 1)
+        self.assertEqual(preview["disc_total"], 1)
         self.assertEqual(preview["tracks"][0]["track"], "1/1")
         self.assertEqual(plan["tracks"][0]["disc"], 1)
         approved = validate_plan(review_text(plan), self.show)
@@ -117,7 +118,8 @@ class PrepareTests(unittest.TestCase):
         for field in ("disc", "track"):
             with self.subTest(field=field):
                 text = review_text(plan).replace(
-                    f'{field} = "1/1"', f'{field} = "1/2"'
+                    "disc = 1" if field == "disc" else 'track = "1/1"',
+                    f'{field} = "1/2"',
                 )
                 approved = validate_plan(text, self.show)
                 self.assertEqual(approved["tracks"][0][field], "1/2")
@@ -132,14 +134,15 @@ class PrepareTests(unittest.TestCase):
         shutil.copy2(self.source, self.show / "Other.wav")
         plan = build_plan(self.show, self.config)
         rows = tomllib.loads(review_text(plan))["tracks"]
-        self.assertEqual([r["disc"] for r in rows], ["1/2", "2/2"])
+        self.assertEqual([r["disc"] for r in rows], [1, 2])
         self.assertEqual([r["track"] for r in rows], ["1/2", "2/2"])
         self.assertEqual(validate_plan(review_text(plan), self.show), plan)
         (self.show / "Other.wav").unlink()
         notes.write_text(original.replace("1. Song", "Set 2\n1. Song"))
         plan = build_plan(self.show, self.config)
         rows = tomllib.loads(review_text(plan))["tracks"]
-        self.assertEqual(rows[0]["disc"], "2/2")
+        self.assertEqual(rows[0]["disc"], 2)
+        self.assertEqual(plan["disc_total"], 2)
         self.assertEqual(rows[0]["track"], "1/1")
         self.assertEqual(validate_plan(review_text(plan), self.show), plan)
 

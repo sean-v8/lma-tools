@@ -33,7 +33,8 @@ Review cleaned titles, especially intentionally standalone punctuation.
 Without set headings, names use `bandYYYY-MM-DDt01.flac`. Explicit `Set N`
 headings preserve `sNt01`, even when only that set was recorded. Track numbers
 restart at one within each recorded set; tag track numbers run across all
-recorded tracks. The disc denominator is the highest recorded set number.
+recorded tracks. Without existing tags, the shared disc total defaults to the
+highest recorded set number; it does not infer unrecorded sets.
 
 Preparation reads WAV/FLAC title tags and filenames to match setlist rows.
 Ambiguous or missing matches remain blank for correction in editable TOML.
@@ -45,16 +46,25 @@ filenames; existing unrelated destinations are rejected. Missing earlier sets
 are allowed. Every locally recorded track must be mapped; use `-u` when files
 have been temporarily moved out of the folder.
 
-Common fields are `artist`, `album`, `genre`, `venue`, `date` and `artwork`.
+Common fields are `artist`, `album`, `genre`, `venue`, `date`, `artwork` and
+`disc_total`. The last field is a preparation control, never an extra FLAC tag.
+Change it once to apply a show-wide total to every integer `disc` row. For
+example, `disc_total = 3` with `disc = 1` writes `DISCNUMBER=1/3`; set two
+writes
+`2/3`. A per-track pair such as `disc = "1/4"` overrides that shared total.
+
 Each `[[tracks]]` row has `source`, `destination`, `title`, `disc` and `track`.
-Disc and track values display `number/total`, such as `"1/2"` and `"7/18"`.
-Valid existing FLAC track/disc values seed the preview, including partial-show
-totals such as `1/2`. Otherwise notes supply defaults. Approved positive
-number/total pairs are applied exactly; totals can exceed the local inventory
-and track numbers need not be consecutive. The number cannot exceed its total.
-FLAC tags store combined `TRACKNUMBER` and `DISCNUMBER` values; legacy separate
-total fields are removed during retagging. Filename and tag numbering are
-independent editable fields; changing one does not silently change the other.
+Track values display `number/total`, such as `"7/18"`. Valid existing FLAC
+track/disc values seed the preview, including partial-show totals. A uniform
+existing disc denominator seeds `disc_total`; differing totals remain explicit
+per-track overrides. Otherwise notes supply defaults. For an untagged partial
+recording, edit the shared total if more sets occurred than were recorded.
+Approved positive number/total pairs are applied exactly; totals can exceed
+the local inventory and track numbers need not be consecutive. The number
+cannot exceed its total. FLAC tags store combined `TRACKNUMBER` and
+`DISCNUMBER` values; legacy separate total fields are removed during retagging.
+Filename and tag numbering are independent editable fields; changing one does
+not silently change the other.
 Genre is optional; a saved per-collection Genre seeds future preparation. An
 approved Genre is saved even with `-p` when a collection mapping exists. A
 single JPG seeds artwork; otherwise choose an existing JPG or leave empty.

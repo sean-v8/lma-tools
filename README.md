@@ -196,22 +196,28 @@ safeguards and edge cases.
 `--preview` prints the plan without network access, an editor or writes.
 Metadata review uses Ctrl-S to accept and Ctrl-C to cancel; execution requires
 typing `UPLOAD`. Existing-item metadata is updated before file transfers. When
-no saved Creator or reviewed defaults apply, the upload tool checks recent
-collection naming before the interactive review. It prefers the account email
-from `ia configure`, or matches the transferer name when that email is
-unavailable. Up to three recent personal uploads are checked first, then up to
-three other uploads if needed. A majority of at least two matching
-Creator/Title patterns seeds those fields with this show's venue and date.
-Conflicts, unfamiliar title formats and failed lookups leave local naming in
-place. A comment in the editor identifies the suggestion. Saved reviews take
-precedence; `--fresh-metadata` starts a fresh review. Without a saved Creator,
-existing items seed a fresh review with their current Creator/Title. The
-offline `--preview` command does not perform this lookup.
+no saved Creator applies, new items use recent collection naming before the
+interactive review. It prefers the account email from `ia configure`, or
+matches the transferer name when that email is unavailable. Up to three recent
+personal uploads are checked first, then up to three other uploads if needed.
+A majority of at least two matching Creator/Title patterns seeds those fields
+with this show's venue and date. Conflicts, unfamiliar title formats and failed
+lookups leave local naming in place. A comment identifies the suggestion.
 
-`-m` permits reviewed Creator and Title corrections with server-side checks
-against concurrent changes. Normal upload/resume runs still protect those
-fields. Identifier, Collection and Mediatype remain protected on existing
-items; Archive may impose additional restrictions. Descriptions are sent as
+Each ordinary run rebuilds TXT-derived metadata from the current notes. Saved
+collection Creator preferences take precedence over the TXT artist for item
+Creator and Title; FLAC Artist remains independent. Old log reviews cannot
+replace these fresh defaults. Extra reviewed fields without a TXT equivalent
+are retained; `--fresh-metadata` or `--reset-review` drops those saved extras.
+Interactive review includes a read-only comparison with current Archive
+metadata, including line differences for Description. Remote values are
+comparison evidence, not replacement defaults. If lookup fails, the editor
+reports that comparison is unavailable. Offline `--preview` remains local.
+
+Both normal uploads and `-m` permit reviewed Creator and Title corrections with
+server-side checks against concurrent changes. Identifier, Collection and
+Mediatype remain protected on existing items; Archive may impose additional
+restrictions. Descriptions are sent as
 escaped plain text so angle-bracket email credits remain visible. Local changes
 occur only in the approved preparation stage.
 
@@ -264,8 +270,8 @@ checksum requires replacement approval before transfers begin. Append-only
 `IDENTIFIER_lma.log` files in the project directory record approved metadata,
 preparation settings, verified staging, final preparation outcomes, transfer
 outcomes and recovery history. `--no-log` or `log = false` disables
-logging and log-based reuse; remote verification still works. `--fresh-
-metadata` reparses notes instead of reusing reviewed defaults.
+logging and log-based reuse; remote verification still works. Notes are always
+reparsed. `--fresh-metadata` drops saved extra metadata fields as well.
 
 After a timeout or dropped connection, bounded recovery waits and verifies
 remote MD5 and size before resending. A confirmed complete file advances to the

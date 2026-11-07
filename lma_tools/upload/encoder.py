@@ -165,7 +165,9 @@ def expected_tags(common, track, totaltracks, totaldiscs):
         genre=[common["genre"]] if common.get("genre", "").strip() else [],
         title=[track["title"]],
         tracknumber=[number_tag(track["track"], totaltracks)],
-        discnumber=[number_tag(track["disc"], totaldiscs)],
+        discnumber=[
+            number_tag(track["disc"], common.get("disc_total", totaldiscs))
+        ],
     )
     for tags in (common.get("tags", {}), track.get("tags", {})):
         for key, value in tags.items():

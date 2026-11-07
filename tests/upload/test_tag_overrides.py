@@ -65,7 +65,8 @@ class TagOverrideTests(unittest.TestCase):
 
     def test_unmanaged_fields_do_not_trigger_rewrite_or_pcm_checks(self):
         plan = build_plan(self.show, {})
-        self.assertEqual(plan["tracks"][0]["disc"], "1/2")
+        self.assertEqual(plan["tracks"][0]["disc"], 1)
+        self.assertEqual(plan["disc_total"], 2)
         before = self.path.read_bytes(), self.path.stat().st_mtime_ns
         with (
             patch("lma_tools.upload.prepare.tag_audio") as write,
@@ -128,7 +129,8 @@ class TagOverrideTests(unittest.TestCase):
         self.assertEqual(audio["discnumber"], ["3/5"])
         again = build_plan(self.show, {})
         self.assertEqual(again["tracks"][0]["track"], "7/18")
-        self.assertEqual(again["tracks"][0]["disc"], "3/5")
+        self.assertEqual(again["tracks"][0]["disc"], 3)
+        self.assertEqual(again["disc_total"], 5)
         before = self.path.read_bytes(), self.path.stat().st_mtime_ns
         apply_plan(self.show, again)
         self.assertEqual(
@@ -205,7 +207,8 @@ class TagOverrideTests(unittest.TestCase):
         audio.save()
         plan = build_plan(self.show, {})
         self.assertEqual(plan["tracks"][0]["track"], "7/18")
-        self.assertEqual(plan["tracks"][0]["disc"], "1/4")
+        self.assertEqual(plan["tracks"][0]["disc"], 1)
+        self.assertEqual(plan["disc_total"], 4)
         apply_plan(self.show, plan)
         audio = FLAC(self.path)
         self.assertEqual(audio["tracknumber"], ["7/18"])
@@ -229,7 +232,7 @@ class TagOverrideTests(unittest.TestCase):
             with self.subTest(field=field):
                 plan = build_plan(self.show, {})
                 text = review_text(plan)
-                original = '"1/2"' if field == "disc" else '"1/1"'
+                original = "1" if field == "disc" else '"1/1"'
                 text = text.replace(f"{field} = {original}", f"{field} = 7")
-                with self.assertRaisesRegex(ValueError, "number/total"):
+                with self.assertRaises(ValueError):
                     validate_plan(text, self.show)

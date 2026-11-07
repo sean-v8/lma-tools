@@ -44,12 +44,15 @@ collection items. The authenticated uploader email takes precedence over a
 transferer-name match. Up to three personal uploads are checked first, then up
 to three other uploads if needed. A strict majority of at least two matching
 naming patterns is required. Suggestions use the current show's venue and date.
-Saved reviews take precedence, and an existing item's current naming seeds a
-fresh review. Offline previews and completion do not perform the lookup.
+Fresh TXT fields and configured Creator naming take precedence over saved
+reviews. Extra reviewed fields without a TXT equivalent are retained. The
+interactive review compares proposed metadata with a read-only Archive
+snapshot; remote values do not replace local defaults. Offline previews and
+completion do not perform the lookup.
 
-Normal resumes protect existing creation fields. Metadata-only mode permits
-reviewed Creator/Title corrections and sends server-side expectations for
-changed values. Identifier, Collection and Mediatype remain protected. Metadata
+Normal resumes and metadata-only mode both permit reviewed Creator/Title
+corrections and send server-side expectations for changed values. Identifier,
+Collection and Mediatype remain protected. Metadata
 updates complete before file transfers; a new item starts with its notes TXT
 and reviewed creation metadata before other transfers begin.
 

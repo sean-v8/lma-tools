@@ -121,14 +121,14 @@ error.
 adjust future conventions. Tests cover the layouts above, mixed recorder types,
 unknown sources, inline routes and multiline processing.
 
-Use `--fresh-metadata` when testing changes or reparsing an edited TXT.
-Otherwise the last reviewed Source/Lineage in the project log may override
-freshly inferred defaults. Preview remains read-only:
+Edited TXT files are automatically reparsed, including Source/Lineage.
+Source/Lineage are inferred from the current TXT on every ordinary run; the
+project log does not override them. Preview remains read-only:
 
 ```bash
 lmau -m artist2026-08-17.audience.t-flac2448 --fresh-metadata --preview
 ```
 
 Run without `--preview` to review and submit metadata only. `--fresh-metadata`
-resets other previously reviewed defaults too, so revisit any earlier manual
-edits before confirming.
+also drops saved extra fields without a TXT equivalent. Review any manual
+Source/Lineage changes again before confirming.
