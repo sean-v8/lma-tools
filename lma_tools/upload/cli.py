@@ -29,7 +29,6 @@ from lma_tools.config import config_path, read_section
 
 from .collections import (
     get_preference,
-    load_csv,
     save_collection,
     validate,
 )
@@ -842,16 +841,18 @@ def parser():
     p.add_argument(
         "--session-name", action="store_true", help=argparse.SUPPRESS
     )
-    p.add_argument("--config", type=Path, default=None)
     p.add_argument(
-        "--collections",
-        type=Path,
-        default=None,
-        help="legacy CSV override; learned mappings save to config.toml",
+        "--config", type=Path, help="use a different private config file"
     )
-    p.add_argument("--collection")
-    p.add_argument("--identifier")
-    p.add_argument("--notes", type=Path)
+    p.add_argument(
+        "--collection", help="override the configured artist collection"
+    )
+    p.add_argument(
+        "--identifier", help="override the destination Archive identifier"
+    )
+    p.add_argument(
+        "--notes", type=Path, help="select a specific TXT file in the show"
+    )
     p.add_argument(
         "--preview",
         action="store_true",
@@ -867,11 +868,6 @@ def parser():
         "--fresh-metadata",
         action="store_true",
         help="drop saved extra metadata; TXT fields always refresh",
-    )
-    p.add_argument(
-        "--reset-review",
-        action="store_true",
-        help="alias for --fresh-metadata",
     )
     p.add_argument(
         "--trust-log",
@@ -901,8 +897,18 @@ def parser():
         help="use ordinary whole-file PUTs",
     )
     p.set_defaults(resume=None)
-    p.add_argument("--retries", type=int, default=10)
-    p.add_argument("--retry-sleep", type=int, default=60)
+    p.add_argument(
+        "--retries",
+        type=int,
+        default=10,
+        help="upload-library 503 retries (default: 10)",
+    )
+    p.add_argument(
+        "--retry-sleep",
+        type=int,
+        default=60,
+        help="seconds between upload-library 503 retries (default: 60)",
+    )
     return p
 
 
@@ -953,11 +959,7 @@ def run_upload(args, directory, project, config):
         metadata = parse_notes(
             notes.read_text(encoding="utf-8-sig"), identifier
         )
-        previous = (
-            None
-            if args.fresh_metadata or args.reset_review
-            else journal.reviewed_metadata()
-        )
+        previous = None if args.fresh_metadata else journal.reviewed_metadata()
         if previous:
             previous = dict(previous)
             legacy_name = previous.pop("uploader", None)
@@ -1282,11 +1284,6 @@ def main(argv=None):
             "File resume requires upload logging; enable log and omit "
             "--no-log, or use --no-resume."
         )
-    if args.collections is not None:
-        config["collections"] = {
-            **config.get("collections", {}),
-            **load_csv(args.collections),
-        }
     root = config["shows_root"]
     if args.complete is not None or args.list:
         prefix = args.complete or ""

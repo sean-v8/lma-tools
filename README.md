@@ -197,7 +197,7 @@ Each ordinary run rebuilds TXT-derived metadata from the current notes. Saved
 collection Creator preferences take precedence over the TXT artist for item
 Creator and Title; FLAC Artist remains independent. Old log reviews cannot
 replace these fresh defaults. Extra reviewed fields without a TXT equivalent
-are retained; `--fresh-metadata` or `--reset-review` drops those saved extras.
+are retained; `--fresh-metadata` drops those saved extras.
 Interactive review includes a read-only comparison with current Archive
 metadata, including line differences for Description. Remote values are
 comparison evidence, not replacement defaults. If lookup fails, the editor

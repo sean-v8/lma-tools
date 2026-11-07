@@ -3,7 +3,7 @@ _lma_complete() {
     local previous="${COMP_WORDS[COMP_CWORD-1]}"
     COMPREPLY=()
     case "$previous" in
-        --config|--collections|--notes)
+        --config|--notes)
             compopt -o filenames
             mapfile -t COMPREPLY < <(compgen -f -- "$current")
             return ;;
@@ -19,7 +19,7 @@ _lma_complete() {
         fi
     done
     mapfile -t COMPREPLY < <(
-        command lmau "${config_args[@]}" --complete "$current" 2>/dev/null
+        command lmau "${config_args[@]}" --complete="$current" 2>/dev/null
     )
 }
 complete -F _lma_complete lmau lma-upload
