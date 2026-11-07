@@ -139,14 +139,22 @@ incompatible checkpoint.
 
 Completion intent is logged before submitting the request. Assembly is
 asynchronous; an uncertain completion must not start a fresh upload ID or
-resend the entire file. Definite part rejection permits reconciliation, while
+resend the entire file. Transfer workers return after persisting the assembling
+checkpoint. After all transfer jobs drain, a separate bounded verification pass
+opens fresh sessions and confirms pending whole-file MD5/size matches. Only
+then are checkpoints cleared and upload success recorded. A resumed assembling
+checkpoint enters the same pass without sending parts or completion again.
+A remote-confirmed skip also clears its matching checkpoint; explicit log trust
+alone cannot clear it. Definite part rejection permits reconciliation, while
 pending assembly retains state for a later check. Existing ordinary PUT
 progress cannot be converted into multipart checkpoints.
 
 ## Terminal displays and tmux
 
-Concurrent file rows retain file order and close gaps as rows finish. Labels,
-bars and metrics share column widths; long labels shorten in the middle.
+Show grids preallocate one row per selected file below TOTAL, including the
+creation TXT. Queued rows show waiting; completed, skipped and failed rows stay
+in place. Closing the live region prints one final inventory. Labels, bars and
+metrics share column widths; long labels shorten in the middle.
 Routine terminal start/finish messages are suppressed, while errors and
 recovery notices remain visible. Redirected output uses plain status lines.
 
@@ -155,7 +163,9 @@ private atomic status snapshots. These snapshots are display-only and never
 authorize upload skips or retries; the upload log holds resumable part state.
 
 Dashboard bytes cover selected files, including small files in normal mode. The
-completed-file counter always counts FLACs, including verified skips. Partial
+completed-file counter always counts FLACs, including verified skips. Counter
+strings are right-aligned across TOTAL and show rows so status text lines up.
+Partial
 multipart bytes do not count as completed FLACs. Rates count current transport
 reads, excluding hashing and bytes restored from checkpoints. Interrupted runs
 retain confirmed files and checkpointed part bytes. The view smooths heartbeat
@@ -176,7 +186,9 @@ the dashboard does not stop uploads.
 Progress grids recompute widths before tqdm renders or clears a row. A terminal
 resize erases the progress region and resets old padding lengths, preserving
 the preceding terminal output. The dashboard reserves a full-width dashed
-separator below TOTAL and hides its cursor until the view closes.
+separator below TOTAL and hides its cursor until the view closes. A dashboard
+resize resets its dedicated pane and rebuilds the grid under the shared display
+lock, avoiding old wrapped rows and stale tqdm padding.
 
 After a multipart body is consumed, the row shows `awaiting ack` until the
 server responds. A `resume_part_sent` log event distinguishes that wait from

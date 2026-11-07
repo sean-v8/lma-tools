@@ -52,3 +52,30 @@ class DiscoveryTests(unittest.TestCase):
             p.write_text('shows_root = "relative"')
             with self.assertRaisesRegex(ValueError, "absolute"):
                 lma.load_config(p)
+
+    def test_project_sync_notes_do_not_make_a_second_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = make_show(root, project=ID)
+            (output / "one.flac").rename(output / "01-Song.wav")
+            (output.parent / "mix.wav").write_bytes(b"mix")
+            (output.parent / "sync.txt").write_text("Sync markers")
+            (output.parent / "project.aup3").touch()
+            outputs = lma.scan_outputs(root)
+            self.assertEqual(outputs, [(output.parent, output)])
+            self.assertEqual(lma.output_tokens(outputs, root), [ID])
+            for target in (ID, str(output.parent), str(output)):
+                with self.subTest(target=target):
+                    self.assertEqual(
+                        lma.resolve_show(target, root),
+                        (output, output.parent),
+                    )
+
+    def test_real_parent_and_child_outputs_remain_ambiguous(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = make_show(root, project=ID)
+            (output.parent / "mix.wav").write_bytes(b"mix")
+            (output.parent / (ID + ".txt")).write_text("Show notes")
+            with self.assertRaisesRegex(ValueError, "Ambiguous"):
+                lma.resolve_show(ID, root)

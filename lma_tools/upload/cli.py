@@ -586,6 +586,8 @@ def upload_files(
     remote = remote_inventory(item) if item.exists else {}
     total_size = sum(p.stat().st_size for p in selected)
     board = ProgressBoard(files=selected, tracker=tracker)
+    assemblies = []
+    assembly_lock = RLock()
 
     def transfer(
         session,
@@ -635,7 +637,20 @@ def upload_files(
                     "acknowledgement"
                 )
         if reason:
-            board.complete(path.name)
+            state = journal.resume_state(path.name)
+            if (
+                isinstance(state, dict)
+                and not reason.startswith("explicit --trust-log")
+                and state.get("signature")
+                == {
+                    "identifier": item.identifier,
+                    "name": path.name,
+                    "md5": digest,
+                    "size": size,
+                }
+            ):
+                journal.clear_resume(path.name, state["upload_id"])
+            board.complete(path.name, "skipped")
             if tracker is not None:
                 tracker.complete(path.name)
             if not quiet:
@@ -685,7 +700,7 @@ def upload_files(
                     or journal.resume_state(path.name) is not None
                 )
             ):
-                outcome = MultipartUpload(
+                upload = MultipartUpload(
                     session,
                     item.identifier,
                     path,
@@ -698,7 +713,18 @@ def upload_files(
                     progress,
                     cancel,
                     queue_derive=not defer_derive,
-                ).run()
+                )
+                outcome = upload.run(defer_assembly=True)
+                if outcome is None:
+                    with assembly_lock:
+                        assemblies.append((index, upload))
+                    journal.append(
+                        "assembly_pending",
+                        name=path.name,
+                        md5=digest,
+                        size=size,
+                    )
+                    return "assembling"
             else:
                 with watch_transfer(session, path, tracker, progress, cancel):
                     outcome = upload_with_recovery(
@@ -723,6 +749,7 @@ def upload_files(
                 "upload_ok", name=path.name, md5=digest, size=size, **outcome
             )
         except BaseException as exc:
+            progress.finish("failed")
             journal.append(
                 "upload_failed",
                 name=path.name,
@@ -736,57 +763,133 @@ def upload_files(
                 progress.close()
         return "complete"
 
+    def sequential(index, path, metadata):
+        row = board.row(path, index)
+        try:
+            state = transfer(
+                session,
+                item,
+                path,
+                index,
+                metadata,
+                quiet=board.enabled,
+                progress=row,
+                on_state=row.status,
+            )
+            if board.enabled:
+                row.finish(state)
+        except BaseException as exc:
+            row.finish(
+                "cancelled" if isinstance(exc, KeyboardInterrupt) else "failed"
+            )
+            raise
+        finally:
+            row.close()
+
+    def verify_assembly(index, upload, slot, board, cancel):
+        row = board.row(upload.path, index)
+        try:
+            with TransferSession(
+                row, cancel, config=deepcopy(session.config)
+            ) as active:
+                active.cookies.update(session.cookies)
+                upload.session, upload.cancel, upload.progress = (
+                    active,
+                    cancel,
+                    row,
+                )
+                outcome = upload.verify()
+                board.complete(upload.path.name)
+                if tracker is not None:
+                    tracker.complete(upload.path.name)
+                journal.append(
+                    "upload_ok",
+                    name=upload.path.name,
+                    md5=upload.digest,
+                    size=upload.size,
+                    **outcome,
+                )
+                if not board.enabled:
+                    row.finish("complete")
+        except BaseException as exc:
+            row.finish("failed")
+            journal.append(
+                "upload_failed",
+                name=upload.path.name,
+                md5=upload.digest,
+                size=upload.size,
+                error=type(exc).__name__,
+            )
+            raise
+        finally:
+            row.close()
+
     try:
         if workers == 1 or len(selected) <= 1:
             for index, path in enumerate(selected, 1):
-                transfer(session, item, path, index, metadata)
-            return
-        entries = list(enumerate(selected, 1))
-        snapshot = deepcopy(item.item_metadata)
-        if not item.exists:
-            if selected[0].suffix.lower() != ".txt":
-                raise ValueError("A new item must start with its notes TXT")
-            transfer(session, item, selected[0], 1, metadata)
-            entries = entries[1:]
-            snapshot = {
-                "metadata": {**metadata, "identifier": item.identifier}
-            }
-        workers = min(workers, len(entries))
-
-        def concurrent(index, path, slot, board, cancel):
-            row = board.row(path, index)
-            try:
-                with TransferSession(
-                    row, cancel, config=deepcopy(session.config)
-                ) as active:
-                    active.cookies.update(session.cookies)
-                    worker_item = Item(
-                        active, item.identifier, deepcopy(snapshot)
+                sequential(index, path, metadata)
+        else:
+            entries = list(enumerate(selected, 1))
+            snapshot = deepcopy(item.item_metadata)
+            if not item.exists:
+                if selected[0].suffix.lower() != ".txt":
+                    raise ValueError(
+                        "A new item must start with its notes TXT"
                     )
-                    state = transfer(
-                        active,
-                        worker_item,
-                        path,
-                        index,
-                        {},
-                        verbose=False,
-                        notify=row.message,
-                        cancel=cancel,
-                        on_state=row.status,
-                        quiet=board.enabled,
-                        progress=row,
-                    )
-                    row.finish(state)
-            except Exception as exc:
-                detail = " ".join(str(exc).splitlines())[:300]
-                row.message(f"Failed: {type(exc).__name__}: {detail}")
-                raise
-            finally:
-                row.close()
+                sequential(1, selected[0], metadata)
+                entries = entries[1:]
+                snapshot = {
+                    "metadata": {**metadata, "identifier": item.identifier}
+                }
+            active_workers = min(workers, len(entries))
 
-        run_parallel(
-            entries, workers, concurrent, board=board, tracker=tracker
-        )
+            def concurrent(index, path, slot, board, cancel):
+                row = board.row(path, index)
+                try:
+                    with TransferSession(
+                        row, cancel, config=deepcopy(session.config)
+                    ) as active:
+                        active.cookies.update(session.cookies)
+                        worker_item = Item(
+                            active, item.identifier, deepcopy(snapshot)
+                        )
+                        state = transfer(
+                            active,
+                            worker_item,
+                            path,
+                            index,
+                            {},
+                            verbose=False,
+                            notify=row.message,
+                            cancel=cancel,
+                            on_state=row.status,
+                            quiet=board.enabled,
+                            progress=row,
+                        )
+                        row.finish(state)
+                except Exception as exc:
+                    detail = " ".join(str(exc).splitlines())[:300]
+                    row.finish("failed")
+                    row.message(f"Failed: {type(exc).__name__}: {detail}")
+                    raise
+                finally:
+                    row.close()
+
+            run_parallel(
+                entries,
+                active_workers,
+                concurrent,
+                board=board,
+                tracker=tracker,
+            )
+        if assemblies:
+            run_parallel(
+                sorted(assemblies, key=lambda entry: entry[0]),
+                min(workers, len(assemblies)),
+                verify_assembly,
+                board=board,
+                tracker=tracker,
+            )
 
     finally:
         board.close()

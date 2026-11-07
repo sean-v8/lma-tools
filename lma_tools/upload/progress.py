@@ -108,6 +108,13 @@ def progress_values(bar):
         rate = bar._wire_rate()
         values["rate"] = rate
         values["upload_rate"] = upload_size(rate) + "/s"
+    if hasattr(bar, "_display_rate"):
+        values["rate"] = bar._display_rate
+        values["upload_rate"] = (
+            upload_size(bar._display_rate) + "/s"
+            if bar._display_rate is not None
+            else "? B/s"
+        )
     return values
 
 
@@ -217,6 +224,7 @@ class SharedColumns:
 
 class ProgressBoard:
     def __init__(self, stream=None, tracker=None, files=None):
+        files = tuple(files) if files is not None else None
         self.tracker = tracker
         self.stream = stream if stream is not None else sys.stderr
         self.enabled = self.stream.isatty() and os.environ.get("TERM") not in (
@@ -224,6 +232,7 @@ class ProgressBoard:
             "",
             "dumb",
         )
+        self.persistent = self.enabled and files is not None
         # Use tqdm's own reentrant lock, including during monitor refreshes.
         self.lock = tqdm.get_lock()
         self.rows = []
@@ -266,6 +275,10 @@ class ProgressBoard:
                 self.separator.delay = 0
                 self.total._wire_rate = self._rate
                 self.total.delay = 0
+                self.rows = [
+                    ProgressRow(self, path, index)
+                    for index, path in enumerate(files, 1)
+                ]
                 self._redraw()
 
     def _rate(self):
@@ -286,20 +299,34 @@ class ProgressBoard:
             self.total.n = sum(self.sizes[n] for n in self.confirmed)
             self.total.n += sum(self.active.values())
 
-    def complete(self, name):
+    def complete(self, name, state="complete"):
         """Credit a confirmed upload or skip; retain it until board close.
 
         Tracker completion remains the caller's responsibility, as before.
         """
         with self.lock:
+            if self.closed:
+                return
             self._record(name, "complete")
+            if self.persistent:
+                row = next(r for r in self.rows if r.path.name == name)
+                row.bar.n = row.bar.total
+                if state == "skipped":
+                    row.bar._display_rate = 0
+                row.finish(state)
             self._redraw()
 
     def close(self):
-        """Remove the progress region, including TOTAL, exactly once."""
+        """Close live bars and retain one final file inventory on terminals."""
         with self.lock:
             if self.closed:
                 return
+            lines = []
+            if self.persistent:
+                self._redraw()
+                lines = [str(self.total), self.separator.desc]
+                lines.extend(str(row.bar) for row in self.rows)
+            self.closed = True
             for row in list(self.rows):
                 self.remove(row)
             if self.separator is not None:
@@ -307,7 +334,8 @@ class ProgressBoard:
             if self.total is not None:
                 self.total.close()
             self.columns.bars = []
-            self.closed = True
+            if lines:
+                print("\n".join(lines), file=self.stream, flush=True)
 
     def message(self, text, **kwargs):
         with self.lock:
@@ -352,6 +380,11 @@ class ProgressBoard:
         with self.lock:
             if self.closed:
                 raise RuntimeError("Progress board is closed")
+            if self.persistent:
+                row = next(r for r in self.rows if r.path == path)
+                if path.name not in self.confirmed:
+                    row.status("checking")
+                return row
             self._clear()
             row = ProgressRow(self, path, order)
             self.rows.append(row)
@@ -360,7 +393,7 @@ class ProgressBoard:
 
     def remove(self, row):
         with self.lock:
-            if row not in self.rows:
+            if row not in self.rows or (self.persistent and not self.closed):
                 return
             self._clear()
             if row.bar is not None:
@@ -374,6 +407,7 @@ class ProgressRow:
         self.board = board
         self.path = path
         self.order = order
+        self.started = False
         self.bar = None
         if board.enabled:
             self.bar = OrderedProgress(
@@ -393,7 +427,11 @@ class ProgressRow:
                 ),
             )
             self.bar.delay = 0
-            self.bar.set_postfix_str("checking", refresh=False)
+            self.bar.set_postfix_str(
+                "waiting" if board.persistent else "checking", refresh=False
+            )
+            if board.persistent:
+                self.bar._display_elapsed = 0
 
     def message(self, text, *, transient=False, **kwargs):
         if transient and self.board.enabled:
@@ -405,6 +443,11 @@ class ProgressRow:
     def status(self, text):
         with self.board.lock:
             if self.bar is not None:
+                if not self.started:
+                    self.started = True
+                    if hasattr(self.bar, "_display_elapsed"):
+                        del self.bar._display_elapsed
+                    self.bar.start_t = self.bar.last_print_t = self.bar._time()
                 text = {"verifying remote checksum": "verifying"}.get(
                     text, text
                 )
@@ -449,6 +492,15 @@ class ProgressRow:
     def finish(self, state):
         if self.board.enabled:
             self.status(state)
+            if self.board.persistent and state in {
+                "complete",
+                "skipped",
+                "failed",
+                "cancelled",
+            }:
+                values = progress_values(self.bar)
+                self.bar._display_elapsed = values["elapsed"]
+                self.bar._display_rate = values["rate"]
         else:
             self.message(state.capitalize())
 

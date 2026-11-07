@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -83,6 +84,14 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(dashboard.status_text(job), "1/5 completed, derive")
         job["status"] = "failed"
         self.assertEqual(dashboard.status_text(job), "1/5 completed, failed")
+        self.assertEqual(
+            dashboard.status_text(job, 5), "  1/5 completed, failed"
+        )
+        other = dict(job, completed=10, files=10)
+        self.assertEqual(
+            dashboard.status_text(job, 5).index("completed"),
+            dashboard.status_text(other, 5).index("completed"),
+        )
 
     def test_dashboard_timing_uses_run_start_and_rate_not_skipped_bytes(self):
         with OrderedProgress(total=100, file=io.StringIO()) as bar:
@@ -316,6 +325,38 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("lma_tools.upload.dashboard", command[-1])
 
     def test_session_name_starts_with_show(self):
-        name = launcher.cli.tmux_session_name("nephrok2026-08-17.t-flac2448")
-        self.assertTrue(name.startswith("nephrok2026-08-17_"))
+        name = launcher.cli.tmux_session_name("artist2026-08-17.t-flac2448")
+        self.assertTrue(name.startswith("artist2026-08-17_"))
         self.assertNotIn("lma_", name)
+
+    def test_dashboard_resize_rebuilds_the_pane_once_per_size_change(self):
+        stream = io.StringIO()
+        stream.isatty = lambda: True
+        job = self.job(time.time() - 120, heartbeat=time.time())
+        dimensions = [
+            os.terminal_size((180, 40)),
+            os.terminal_size((95, 40)),
+            os.terminal_size((160, 40)),
+        ]
+
+        def fixed_bar(**kwargs):
+            kwargs.update(dynamic_ncols=False, ncols=180)
+            return OrderedProgress(**kwargs)
+
+        with (
+            patch.object(dashboard, "OrderedProgress", side_effect=fixed_bar),
+            patch.object(dashboard.sys, "stderr", stream),
+            patch.object(dashboard, "read_jobs", return_value=[job]),
+            patch.object(
+                dashboard, "terminal_dimensions", side_effect=dimensions
+            ),
+            patch.object(
+                dashboard.time,
+                "sleep",
+                side_effect=[None, None, KeyboardInterrupt],
+            ),
+        ):
+            dashboard.dashboard(Path("unused"))
+        self.assertEqual(stream.getvalue().count("\x1b[2J\x1b[H"), 2)
+        self.assertIn("TOTAL", stream.getvalue())
+        self.assertTrue(stream.getvalue().endswith("\x1b[?25h"))

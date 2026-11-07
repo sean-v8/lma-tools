@@ -4,11 +4,14 @@ import argparse
 import json
 import math
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
 from threading import Event, RLock, Thread
 from uuid import uuid4
+
+from tqdm import tqdm
 
 from .progress import OrderedProgress, SharedColumns
 
@@ -90,9 +93,10 @@ def elapsed_time(jobs, now=None):
     return max(0, end - min(job["started"] for job in jobs))
 
 
-def status_text(job):
+def status_text(job, counter_width=0):
     """Normal transfers need no status label beside their moving bar."""
-    text = f"{job['completed']}/{job['files']} completed"
+    counter = f"{job['completed']}/{job['files']}"
+    text = f"{counter:>{counter_width}} completed"
     state = job["status"]
     if state == "uploading":
         return text
@@ -254,6 +258,13 @@ def read_jobs(directory, now=None):
     return sorted(jobs, key=lambda job: job["started"])
 
 
+def terminal_dimensions(stream):
+    try:
+        return os.get_terminal_size(stream.fileno())
+    except (OSError, ValueError):
+        return shutil.get_terminal_size()
+
+
 def dashboard(directory):
     bars = {}
     separator = OrderedProgress(
@@ -262,6 +273,7 @@ def dashboard(directory):
     separator.delay = 0
     columns = SharedColumns()
     history = DashboardJobs()
+    previous_dimensions = None
     if not sys.stderr.isatty():
         raise ValueError("The upload dashboard needs a terminal.")
     sys.stderr.write("\x1b[?25l")
@@ -269,52 +281,74 @@ def dashboard(directory):
         while True:
             jobs = history.update(read_jobs(directory))
             jobs = [total_progress(jobs), *jobs]
-            for bar in bars.values():
-                bar.clear()
-            separator.sp = separator.status_printer(separator.fp)
-            separator.clear()
-            present = {job["started"] for job in jobs}
-            for key in list(bars):
-                if key not in present:
-                    bars.pop(key).close()
-            for index, job in enumerate(jobs):
-                position = index if index == 0 else index + 1
-                key = job["started"]
-                if key not in bars:
-                    bars[key] = OrderedProgress(
-                        total=job["total"],
-                        desc=job["identifier"],
-                        position=position,
-                        leave=False,
-                        delay=1,
-                        dynamic_ncols=True,
-                        unit="B",
-                        miniters=1,
-                        bar_format=(
-                            "{desc} {percentage:3.0f}%|{bar}| "
-                            "{uploaded}/{expected} [{upload_rate}{postfix}]"
-                        ),
-                    )
-                    bars[key].delay = 0
-                bar = bars[key]
-                bar.total = job["total"]
-                bar.pos = -position
-                bar.n = job["sent"]
-                bar._display_elapsed = (
-                    job["elapsed"] if "elapsed" in job else elapsed_time([job])
-                )
-                bar._ema_dn = lambda value=job["rate"]: value
-                bar._ema_dt = lambda: 1
-                bar.set_postfix_str(
-                    status_text(job),
-                    refresh=False,
-                )
-            columns.prepare([bars[job["started"]] for job in jobs])
-            separator.display(
-                msg="-" * max(1, columns.terminal_width - 1), pos=1
+            counter_width = max(
+                len(f"{job['completed']}/{job['files']}") for job in jobs
             )
-            for job in jobs:
-                bars[job["started"]].refresh()
+            with tqdm.get_lock():
+                dimensions = terminal_dimensions(sys.stderr)
+                resized = previous_dimensions not in (None, dimensions)
+                previous_dimensions = dimensions
+                if resized:
+                    # This dedicated view owns its pane; reset reflowed rows.
+                    sys.stderr.write("\x1b[2J\x1b[H")
+                    sys.stderr.flush()
+                    columns.terminal_width = None
+                    for bar in bars.values():
+                        bar.sp = bar.status_printer(bar.fp)
+                        bar._rendered_width = 0
+                        bar.ncols, bar.nrows = dimensions
+                    separator.sp = separator.status_printer(separator.fp)
+                    separator.ncols, separator.nrows = dimensions
+                else:
+                    for bar in bars.values():
+                        bar.clear()
+                    separator.sp = separator.status_printer(separator.fp)
+                    separator.clear()
+                present = {job["started"] for job in jobs}
+                for key in list(bars):
+                    if key not in present:
+                        bars.pop(key).close()
+                for index, job in enumerate(jobs):
+                    position = index if index == 0 else index + 1
+                    key = job["started"]
+                    if key not in bars:
+                        bars[key] = OrderedProgress(
+                            total=job["total"],
+                            desc=job["identifier"],
+                            position=position,
+                            leave=False,
+                            delay=1,
+                            dynamic_ncols=True,
+                            unit="B",
+                            miniters=1,
+                            bar_format=(
+                                "{desc} {percentage:3.0f}%|{bar}| "
+                                "{uploaded}/{expected} "
+                                "[{upload_rate}{postfix}]"
+                            ),
+                        )
+                        bars[key].delay = 0
+                    bar = bars[key]
+                    bar.total = job["total"]
+                    bar.pos = -position
+                    bar.n = job["sent"]
+                    bar._display_elapsed = (
+                        job["elapsed"]
+                        if "elapsed" in job
+                        else elapsed_time([job])
+                    )
+                    bar._ema_dn = lambda value=job["rate"]: value
+                    bar._ema_dt = lambda: 1
+                    bar.set_postfix_str(
+                        status_text(job, counter_width),
+                        refresh=False,
+                    )
+                columns.prepare([bars[job["started"]] for job in jobs])
+                separator.display(
+                    msg="-" * max(1, columns.terminal_width - 1), pos=1
+                )
+                for job in jobs:
+                    bars[job["started"]].refresh()
             time.sleep(1)
     except KeyboardInterrupt:
         pass

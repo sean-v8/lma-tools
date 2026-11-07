@@ -224,9 +224,10 @@ FLACs share the same bounded pool. Existing-item metadata updates finish before
 any file
 transfer starts. Upload-only mode does not edit metadata or runtime.
 
-Each active file has its own progress bar, byte count and IEC speed. Active
-rows stay in file order; completed rows disappear and the remaining rows close
-the gap. Shared label, bar and metric columns keep all rows aligned. Long
+Every selected file has a row below TOTAL, including TXT/JPG/FFP/MD5 files.
+Rows begin as waiting, stay in file order and remain visible after completion,
+skipping or failure. A final grid is retained when the live display closes.
+Shared label, bar and metric columns keep all rows aligned. Long
 filenames shorten to keep speeds visible. Routine start/finish messages are
 suppressed in this display. Multipart retry details stay in the journal;
 short retry states occupy the affected row until transfers proceed. One file's
@@ -241,9 +242,16 @@ lmau --workers 3 band2026-08-17.audience
 lmau -u --workers 1 band2026-08-17.audience
 ```
 
-`--workers 1` retains sequential uploads and the original single-file display.
-Increasing the limit helps only while the connection and Archive can support
-more transfers. A few workers are easier to monitor than every track at once.
+`--workers 1` sends one file at a time. The full file grid is the same at every
+worker limit. Increasing the limit helps only while the connection and Archive
+can support more transfers.
+
+A multipart transfer releases its worker after completion is submitted; it does
+not hold the slot while Archive assembles the file. Once all transfers have
+been submitted, a separate verification pass uses the same worker limit to
+confirm pending assemblies. Rows show assembling until remote whole-file MD5
+and size match. Pending files are not successful uploads: their checkpoints
+remain, and cleanup/final derivation wait for every verification to succeed.
 
 A failed file stops new files from starting. Already-active transfers finish
 and record their outcomes; derivation is queued only when all selected files
@@ -416,14 +424,15 @@ dependency or entry-point changes. Ordinary source edits take effect through
 the editable installation. `uv tool uninstall lma-tools` removes installed
 commands while leaving the checkout and private data.
 
-To run the offline test suite and style checks:
+To run the offline test suite and read-only style checks:
 
 ```bash
-uv sync --locked
-uv run --locked ruff format --check .
-uv run --locked ruff check .
-uv run --locked python -B -m tests
+bash scripts/test.sh
 ```
+
+The script selects the checkout independently of the working directory, uses
+locked dependencies with the development group, and stops at the first failed
+check. It does not format or modify source files.
 
 Checks also run on GitHub through [GitHub
 Actions](.github/workflows/checks.yml). HTTP behavior is covered with mocks;

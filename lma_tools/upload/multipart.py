@@ -441,11 +441,13 @@ class MultipartUpload:
             "Checkpoint retained; rerun to check without resending the file."
         )
 
-    def run(self):
+    def run(self, *, defer_assembly=False):
+        """Return None when deferring assembly; success still needs verify."""
         created = self.load()
         if self.state["phase"] == "assembling":
             self.progress.resume(self.size)
-            return self.verify()
+            self.progress.status("assembling")
+            return None if defer_assembly else self.verify()
         if self.state["phase"] == "uploading":
             if not created:
                 self.progress.status("resuming")
@@ -555,4 +557,5 @@ class MultipartUpload:
             self.progress.message("Completion uncertain; verifying assembly.")
         self.state["phase"] = "assembling"
         self.save()
-        return self.verify()
+        self.progress.status("assembling")
+        return None if defer_assembly else self.verify()

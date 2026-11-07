@@ -132,12 +132,12 @@ class IntegrationTests(unittest.TestCase):
             patch.object(
                 launcher.subprocess,
                 "run",
-                return_value=Mock(returncode=0, stdout="nephrok-session\n"),
+                return_value=Mock(returncode=0, stdout="artist-session\n"),
             ),
             patch.object(cli, "main") as run,
         ):
             run.side_effect = lambda args: os.environ["LMA_UPLOAD_SESSION"]
-            self.assertEqual(launcher.launch([]), "nephrok-session")
+            self.assertEqual(launcher.launch([]), "artist-session")
             self.assertNotIn("LMA_UPLOAD_SESSION", os.environ)
             ensure.assert_called_once()
 

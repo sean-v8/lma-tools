@@ -170,7 +170,7 @@ class ShowTotalTests(unittest.TestCase):
         first.advance(1)
         first.close()
         self.assertEqual(board.total.n, 200)
-        self.assertEqual(board.rows, [])
+        self.assertEqual(board.rows, [first, second])
         self.assertFalse(board.total.disable)
         board.close()
         board.close()
@@ -212,7 +212,7 @@ class ShowTotalTests(unittest.TestCase):
             self.assertTrue(all(len(line) < width for line in lines))
             board.message("Keep this status")
         rows[0].close()
-        self.assertEqual(abs(rows[1].bar.pos), 2)
+        self.assertEqual(abs(rows[1].bar.pos), 3)
         self.assertIn("Keep this status", board.stream.getvalue())
         self.assertNotIn("\x1b[J", board.stream.getvalue())
         self.assertNotIn("\x1b[2J", board.stream.getvalue())
@@ -286,6 +286,35 @@ class ShowTotalTests(unittest.TestCase):
         self.addCleanup(board.close)
         self.assertEqual(board.total.total, 0)
 
+    def test_full_inventory_waits_and_completed_rows_keep_their_positions(
+        self,
+    ):
+        board = self.board()
+        self.assertEqual([row.path for row in board.rows], self.files)
+        self.assertEqual(
+            [row.bar.postfix for row in board.rows], ["waiting", "waiting"]
+        )
+        self.assertEqual(
+            [row.bar.format_dict["elapsed"] for row in board.rows], [0, 0]
+        )
+        row = board.row(self.files[0], 1)
+        row.begin()
+        row.advance(100)
+        board.complete("a")
+        row.close()
+        self.assertEqual(len(board.rows), 2)
+        self.assertEqual(row.bar.postfix, "complete")
+        self.assertEqual(board.rows[1].bar.postfix, "waiting")
+        board.complete("b", "skipped")
+        self.assertEqual(board.rows[1].bar.n, 100)
+        self.assertEqual(board.rows[1].bar.postfix, "skipped")
+        self.assertEqual([abs(r.bar.pos) for r in board.rows], [2, 3])
+        board.close()
+        final = board.stream.getvalue().splitlines()[-4:]
+        self.assertIn("TOTAL", final[0])
+        self.assertIn("complete", final[-2])
+        self.assertIn("skipped", final[-1])
+
 
 class TransientWarningTests(unittest.TestCase):
     def test_interactive_warning_is_replaced_by_transfer_status(self):
@@ -339,7 +368,9 @@ class TransientWarningTests(unittest.TestCase):
             ):
                 cli.upload_files(Mock(), item, [path], {}, journal, 0, 0)
             self.assertEqual(output.getvalue(), "")
-            self.assertIn("Checking notes.txt", notify.call_args.args[0])
+            notify.assert_not_called()
+            self.assertIn("notes.txt", board.stream.getvalue())
+            self.assertIn("complete", board.stream.getvalue())
             self.assertTrue(board.closed)
             self.assertTrue(board.separator.disable)
 

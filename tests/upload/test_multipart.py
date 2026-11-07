@@ -549,3 +549,114 @@ class MultipartTests(unittest.TestCase):
         self.assertIsNone(cli.parser().parse_args([]).resume)
         self.assertNotIn("--resume ", cli.parser().format_help())
         self.assertFalse(cli.parser().parse_args(["--no-resume"]).resume)
+
+    def test_deferred_assembly_keeps_checkpoint_and_can_resume_without_puts(
+        self,
+    ):
+        upload = self.upload()
+        with patch.object(upload, "verify") as verify:
+            self.assertIsNone(upload.run(defer_assembly=True))
+        verify.assert_not_called()
+        state = upload.journal.resume_state(self.path.name)
+        self.assertEqual(state["phase"], "assembling")
+        sent = len(self.puts)
+        resumed = self.upload()
+        self.assertIsNone(resumed.run(defer_assembly=True))
+        self.assertEqual(len(self.puts), sent)
+        resumed.verify()
+        self.assertIsNone(resumed.journal.resume_state(self.path.name))
+
+    def test_transfer_slots_are_reused_before_any_assembly_polling(self):
+        from requests import Session
+
+        paths = [self.path]
+        for name in ("two.flac", "three.flac"):
+            path = self.path.with_name(name)
+            path.write_bytes(self.path.read_bytes())
+            paths.append(path)
+        item = Item(
+            self.session,
+            "artist2026-08-17",
+            {"metadata": {"identifier": "artist2026-08-17"}, "files": []},
+        )
+        journal = cli.Journal(self.log, item.identifier)
+        checked = []
+
+        def remote(*args, **kwargs):
+            self.assertEqual(self.next_id, 3)
+            self.assertFalse(self.uploads)
+            checked.append(args[2])
+            return "match", "metadata"
+
+        with (
+            patch.object(
+                Session,
+                "send",
+                new=lambda owner, request, **kw: self.transport(request, **kw),
+            ),
+            patch.object(multipart, "remote_state", side_effect=remote),
+        ):
+            cli.upload_files(
+                self.session,
+                item,
+                paths,
+                {},
+                journal,
+                0,
+                0,
+                workers=2,
+                recovery=self.policy,
+                multipart=multipart.MultipartOptions(True, 5),
+            )
+        self.assertCountEqual(checked, [path.name for path in paths])
+        self.assertEqual(
+            sum(e["event"] == "upload_ok" for e in journal.events()), 3
+        )
+
+    def test_unconfirmed_deferred_assembly_never_logs_upload_success(self):
+        item = Item(
+            self.session,
+            "artist2026-08-17",
+            {"metadata": {"identifier": "artist2026-08-17"}, "files": []},
+        )
+        journal = cli.Journal(self.log, item.identifier)
+        self.visible = False
+        with self.assertRaises(multipart.AssemblyPending):
+            cli.upload_files(
+                self.session,
+                item,
+                [self.path],
+                {},
+                journal,
+                0,
+                0,
+                recovery=self.policy,
+                multipart=multipart.MultipartOptions(True, 5),
+            )
+        self.assertFalse(
+            any(e["event"] == "upload_ok" for e in journal.events())
+        )
+        self.assertEqual(
+            journal.resume_state(self.path.name)["phase"], "assembling"
+        )
+        sent = len(self.puts)
+        item.files.append(
+            {
+                "name": self.path.name,
+                "md5": self.digest,
+                "size": str(self.size),
+            }
+        )
+        cli.upload_files(
+            self.session,
+            item,
+            [self.path],
+            {},
+            journal,
+            0,
+            0,
+            recovery=self.policy,
+            multipart=multipart.MultipartOptions(True, 5),
+        )
+        self.assertEqual(len(self.puts), sent)
+        self.assertIsNone(journal.resume_state(self.path.name))
