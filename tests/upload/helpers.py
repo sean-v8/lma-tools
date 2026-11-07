@@ -58,7 +58,7 @@ def metadata_fixture(self):
         config = root / "config.toml"
         config.write_text(
             f'[upload]\nshows_root = "{root}"\nupload_workers = 1\n'
-            '[upload.collections]\nartist = "ExampleArtistCollection"\n'
+            '[upload.prefix]\nartist = "ExampleArtistCollection"\n'
         )
         metadata = lma.parse_notes(NOTES, ID)
         metadata.update(

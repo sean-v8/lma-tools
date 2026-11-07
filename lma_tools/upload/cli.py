@@ -88,10 +88,14 @@ def load_config(path):
             "and set shows_root for this machine."
         )
     config = read_section(path, "upload")
+    if "collections" in config:
+        if "prefix" in config:
+            raise ValueError("Use only upload.prefix, not both mapping tables")
+        config["prefix"] = config.pop("collections")
     unknown = set(config) - {
         "shows_root",
         "log",
-        "collections",
+        "prefix",
         "recovery",
         "upload_workers",
         "prepare_workers",
@@ -110,7 +114,7 @@ def load_config(path):
     config["shows_root"] = root.resolve()
     if not isinstance(config.get("log", True), bool):
         raise ValueError("config log must be true or false.")
-    validate(config.get("collections", {}))
+    validate(config.get("prefix", {}))
     load_policy(config.get("recovery", {}))
     upload_workers(config.get("upload_workers", 3))
     from .prepare import preparation_workers

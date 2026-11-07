@@ -32,7 +32,7 @@ class ToolNameTests(unittest.TestCase):
         return (
             f"# private header\n[uploader] # upload settings\n"
             f'shows_root = "{root}"\nlog = false\n'
-            '[uploader.collections.artist]\ncollection = "Artist"\n'
+            '[uploader.prefix.artist]\ncollection = "Artist"\n'
             'creator = "Artist Name" # keep\ngenre = "Jazz"\n'
             '[views] # report settings\nsort = "views"\n'
         )
@@ -58,7 +58,7 @@ class ToolNameTests(unittest.TestCase):
             self.assertNotIn("report", data)
             self.assertEqual(data["views"]["sort"], "views")
             self.assertEqual(
-                data["uploader"]["collections"]["artist"],
+                data["uploader"]["prefix"]["artist"],
                 {
                     "collection": "Artist",
                     "creator": "Artist Name",
@@ -73,13 +73,13 @@ class ToolNameTests(unittest.TestCase):
             original = self.config(tmp)
             path.write_text(original)
             with redirect_stdout(io.StringIO()):
-                migration.upgrade(path)
+                migration.upgrade(path, backup_dir=path.parent / ".bak")
             migrated = path.read_text()
             data = tomllib.loads(migrated)
             self.assertEqual(set(data), {"upload", "report"})
             self.assertEqual(data["report"], {"sort": "views"})
             self.assertEqual(
-                data["upload"]["collections"]["artist"],
+                data["upload"]["prefix"]["artist"],
                 {
                     "collection": "Artist",
                     "creator": "Artist Name",
@@ -91,12 +91,12 @@ class ToolNameTests(unittest.TestCase):
             self.assertIn("# keep", migrated)
             self.assertLess(
                 migrated.index("[report]"),
-                migrated.index("[upload.collections.artist]"),
+                migrated.index("[upload.prefix.artist]"),
             )
-            backup = path.with_name("config.toml.before-tool-names")
+            backup = migration.backup_path(path, path.parent / ".bak")
             self.assertEqual(backup.read_text(), original)
             with redirect_stdout(io.StringIO()):
-                migration.upgrade(path)
+                migration.upgrade(path, backup_dir=path.parent / ".bak")
             self.assertEqual(path.read_text(), migrated)
             self.assertEqual(backup.read_text(), original)
 
@@ -108,7 +108,7 @@ class ToolNameTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not both"):
                 read_section(path, "upload")
             with self.assertRaisesRegex(ValueError, "not both"):
-                migration.upgrade(path)
+                migration.upgrade(path, backup_dir=path.parent / ".bak")
             self.assertEqual(path.read_text(), original)
 
     def test_existing_migration_backup_is_never_overwritten(self):
@@ -116,10 +116,11 @@ class ToolNameTests(unittest.TestCase):
             path = Path(tmp) / "config.toml"
             original = self.config(tmp)
             path.write_text(original)
-            backup = path.with_name("config.toml.before-tool-names")
+            backup = migration.backup_path(path, path.parent / ".bak")
+            backup.parent.mkdir()
             backup.write_text("old backup")
             with self.assertRaises(FileExistsError):
-                migration.upgrade(path)
+                migration.upgrade(path, backup_dir=path.parent / ".bak")
             self.assertEqual(path.read_text(), original)
             self.assertEqual(backup.read_text(), "old backup")
 

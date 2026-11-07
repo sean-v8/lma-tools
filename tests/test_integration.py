@@ -55,7 +55,7 @@ class IntegrationTests(unittest.TestCase):
                 load_config(dest / "config.toml").query, ("venue:demo",)
             )
             self.assertEqual(
-                cli.load_config(dest / "config.toml")["collections"],
+                cli.load_config(dest / "config.toml")["prefix"],
                 {"band": "collection"},
             )
             before = (dest / "config.toml").read_bytes()

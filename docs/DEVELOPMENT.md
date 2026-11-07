@@ -16,9 +16,10 @@ Config discovery is independent of the working directory: explicit config, the
 environment override, the editable checkout, then the XDG location. Private
 config, credentials, recordings and logs must stay out of Git.
 
-Named preference tables live in `[upload.collections.PREFIX]`, with
+Named preference tables live in `[upload.prefix.PREFIX]`, with
 `collection`, optional `creator` and optional `genre`.
-Collection tables are saved after basic upload and report settings. The TOML
+Prefix tables are sorted alphabetically after basic upload/report settings.
+The TOML
 writer keeps comments and unrelated settings, locks the config directory and
 replaces the file atomically. Tests cover concurrent writers and failed
 replacements.

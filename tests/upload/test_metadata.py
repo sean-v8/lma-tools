@@ -169,7 +169,7 @@ class MetadataRefreshTests(TestCase):
             config.write_text(
                 config.read_text().replace(
                     'artist = "ExampleArtistCollection"',
-                    "[upload.collections.artist]\n"
+                    "[upload.prefix.artist]\n"
                     'collection = "ExampleArtistCollection"\n'
                     'creator = "Current Artist"',
                 )

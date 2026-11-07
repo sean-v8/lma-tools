@@ -34,7 +34,7 @@ def preference(value):
 
 def validate(values):
     if not isinstance(values, dict):
-        raise ValueError("upload.collections must map prefixes to names")
+        raise ValueError("upload.prefix must map prefixes to preferences")
     for key, value in values.items():
         if not isinstance(key, str) or not key.strip():
             raise ValueError("Collection prefixes must be nonempty text")
@@ -43,7 +43,9 @@ def validate(values):
 
 
 def get_preference(config, prefix):
-    value = config.get("collections", {}).get(prefix)
+    if "prefix" in config and "collections" in config:
+        raise ValueError("Use only upload.prefix, not both mapping tables")
+    value = config.get("prefix", config.get("collections", {})).get(prefix)
     return preference(value) if value is not None else {}
 
 
@@ -81,6 +83,18 @@ def replace_text(path, text):
             os.unlink(temporary)
 
 
+def sort_prefixes(values):
+    """Sort preference entries by prefix while retaining TOML value trivia."""
+    entries = sorted(
+        values.items(), key=lambda item: (item[0].casefold(), item[0])
+    )
+    if list(values) != [name for name, _ in entries]:
+        for name, _ in entries:
+            del values[name]
+        for name, value in entries:
+            values[name] = value
+
+
 def save_collection(path, abbreviation, collection, creator=None, genre=None):
     """Read fresh under a directory lock, retaining other tools' settings."""
     path = Path(path).resolve()
@@ -94,9 +108,12 @@ def save_collection(path, abbreviation, collection, creator=None, genre=None):
             if SECTION_NAMES.intersection(document)
             else document
         )
-        if "collections" not in section:
-            section["collections"] = tomlkit.table()
-        values = section["collections"]
+        if "prefix" in section and "collections" in section:
+            raise ValueError("Use only upload.prefix, not both mapping tables")
+        mapping_key = "collections" if "collections" in section else "prefix"
+        if mapping_key not in section:
+            section[mapping_key] = tomlkit.table()
+        values = section[mapping_key]
         validate(values)
         existing = values.get(abbreviation)
         if creator is None and genre is None:
@@ -125,16 +142,17 @@ def save_collection(path, abbreviation, collection, creator=None, genre=None):
                 values[abbreviation] = table
             else:
                 values[abbreviation] = updated
-        # Keep every collection block after ordinary upload/report settings.
-        del section["collections"]
+        sort_prefixes(values)
+        # Keep prefix blocks after ordinary upload/report settings.
+        del section[mapping_key]
         text = tomlkit.dumps(document).rstrip() + "\n\n"
         tail = tomlkit.document()
         if section is document:
-            tail["collections"] = values
+            tail[mapping_key] = values
         else:
             tail[key] = tomlkit.table(is_super_table=True)
-            tail[key]["collections"] = values
-        text += tomlkit.dumps(tail)
+            tail[key][mapping_key] = values
+        text += tomlkit.dumps(tail).lstrip("\n")
         tomlkit.parse(text)
         if text != path.read_text(encoding="utf-8"):
             replace_text(path, text)

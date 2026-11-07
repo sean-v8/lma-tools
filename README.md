@@ -67,7 +67,7 @@ log = true
 query = ['collection:(etree OR taperssection)']
 sort = "publicdate"
 
-[upload.collections.band]
+[upload.prefix.band]
 collection = "ArchiveCollection"
 creator = "Example Artist"
 genre = "Rock"
@@ -79,7 +79,8 @@ prefixes with Archive collection names; approved mappings are saved here
 without changing unrelated settings or comments. See
 [config.example.toml](config.example.toml) for optional defaults, including
 upload recovery settings. Keep basic upload and report settings above the
-collection tables at the end. Approved Creator preferences avoid repeated
+prefix tables alphabetically at the end. Approved Creator preferences avoid
+repeated
 naming-history lookups; approved Genre is
 saved by preparation, including `-p`, for an existing mapping.
 

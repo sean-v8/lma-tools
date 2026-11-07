@@ -24,7 +24,7 @@ class CollectionTests(unittest.TestCase):
         path = root / "config.toml"
         path.write_text(
             '# Private defaults\n[upload]\nshows_root = "/recordings"\n'
-            "log = false # keep me\n\n[upload.collections]\n"
+            "log = false # keep me\n\n[upload.prefix]\n"
             'old = "OldCollection" # keep this too\n\n[report]\n'
             'query = ["venue:demo"] # private query\nsort = "publicdate"\n'
         )
@@ -42,7 +42,7 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(new["report"], old["report"])
             self.assertEqual(new["upload"]["log"], False)
             self.assertEqual(
-                new["upload"]["collections"],
+                new["upload"]["prefix"],
                 {"old": "OldCollection", "new.band": "NewCollection"},
             )
             self.assertIn('old = "OldCollection" # keep this too', text)
@@ -66,7 +66,7 @@ class CollectionTests(unittest.TestCase):
                 ]
                 for future in futures:
                     future.result(timeout=15)
-            values = tomllib.loads(path.read_text())["upload"]["collections"]
+            values = tomllib.loads(path.read_text())["upload"]["prefix"]
             self.assertEqual(len(values), 13)
             self.assertEqual(values["old"], "OldCollection")
 
@@ -93,17 +93,17 @@ class CollectionTests(unittest.TestCase):
             csv = root / "bands.csv"
             csv.write_text('band,Collection\n"band.other",OtherCollection\n')
             with redirect_stdout(io.StringIO()):
-                migration.upgrade(path)
-                migration.upgrade(path)
+                migration.upgrade(path, backup_dir=path.parent / ".bak")
+                migration.upgrade(path, backup_dir=path.parent / ".bak")
             document = tomllib.loads(path.read_text())
             self.assertEqual(
-                document["upload"]["collections"],
+                document["upload"]["prefix"],
                 {"band": "Collection", "band.other": "OtherCollection"},
             )
             self.assertIn("# Private comment", path.read_text())
             self.assertEqual(document["report"], {"sort": "views"})
             self.assertEqual(
-                (root / "config.toml.before-collections").read_text(), text
+                migration.backup_path(path, root / ".bak").read_text(), text
             )
             self.assertTrue(csv.exists())
 
@@ -114,12 +114,14 @@ class CollectionTests(unittest.TestCase):
             path.write_text('[upload]\ncollections = "missing.csv"\n')
             original = path.read_bytes()
             with self.assertRaises(FileNotFoundError):
-                migration.upgrade(path)
+                migration.upgrade(path, backup_dir=path.parent / ".bak")
             self.assertEqual(path.read_bytes(), original)
             (root / "missing.csv").write_text("band,Name\n")
-            (root / "config.toml.before-collections").write_text("backup")
+            backup = migration.backup_path(path, root / ".bak")
+            backup.parent.mkdir()
+            backup.write_text("backup")
             with self.assertRaises(FileExistsError):
-                migration.upgrade(path)
+                migration.upgrade(path, backup_dir=path.parent / ".bak")
             self.assertEqual(path.read_bytes(), original)
 
     def test_invalid_mapping_types_and_conflicting_csv(self):
@@ -136,7 +138,7 @@ class CollectionTests(unittest.TestCase):
 class PreferenceTests(unittest.TestCase):
     def test_string_and_named_collection_entries(self):
         config = {
-            "collections": {
+            "prefix": {
                 "old": "Old",
                 "new": {
                     "collection": "New",
@@ -145,7 +147,7 @@ class PreferenceTests(unittest.TestCase):
                 },
             }
         }
-        validate(config["collections"])
+        validate(config["prefix"])
         self.assertEqual(get_preference(config, "old"), {"collection": "Old"})
         self.assertEqual(get_preference(config, "new")["genre"], "Jazz")
         self.assertEqual(get_preference(config, "missing"), {})
@@ -158,7 +160,7 @@ class PreferenceTests(unittest.TestCase):
             path = Path(tmp) / "config.toml"
             path.write_text(
                 '# private\n[upload]\nshows_root="/shows"\n'
-                '[upload.collections]\nband="Collection" # retained\n'
+                '[upload.prefix]\nband="Collection" # retained\n'
                 '[report]\nsort="views" # sorting\n'
             )
             save_collection(path, "band", "Collection", creator="Artist")
@@ -166,7 +168,7 @@ class PreferenceTests(unittest.TestCase):
             text = path.read_text()
             data = tomllib.loads(text)
             self.assertEqual(
-                data["upload"]["collections"]["band"],
+                data["upload"]["prefix"]["band"],
                 {
                     "collection": "Collection",
                     "creator": "Artist",
@@ -176,7 +178,84 @@ class PreferenceTests(unittest.TestCase):
             self.assertEqual(data["report"], {"sort": "views"})
             self.assertLess(
                 text.index("[report]"),
-                text.index("[upload.collections.band]"),
+                text.index("[upload.prefix.band]"),
             )
             self.assertIn("# private", text)
             self.assertIn("# sorting", text)
+
+    def test_named_blocks_sort_by_prefix_and_preserve_table_comments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text(
+                '[upload]\nshows_root="/shows"\n'
+                '[report]\nsort="views" # report setting\n\n'
+                "[upload.prefix.zulu] # zulu header\n"
+                'collection="Zulu" # zulu value\n'
+                '[upload.prefix.alpha]\ncollection="Alpha"\n'
+            )
+            save_collection(path, "middle", "Middle", creator="Artist")
+            data = tomllib.loads(path.read_text())
+            self.assertEqual(
+                list(data["upload"]["prefix"]),
+                ["alpha", "middle", "zulu"],
+            )
+            text = path.read_text()
+            self.assertIn("# zulu header", text)
+            self.assertIn("# zulu value", text)
+            self.assertIn("# report setting", text)
+            self.assertLess(
+                text.index("[report]"),
+                text.index("[upload.prefix.alpha]"),
+            )
+            before = path.read_bytes()
+            save_collection(path, "middle", "Middle", creator="Artist")
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_upgrade_uses_git_backup_directory_and_preserves_all_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "lma-tools"
+            repo.mkdir()
+            path = repo / "config.toml"
+            original = (
+                '[upload]\nshows_root="/shows"\n'
+                '[report]\nsort="views"\n'
+                '[upload.collections.zulu]\ncollection="Shared"\n'
+                'creator="Artist Z"\ngenre="Rock"\n'
+                '[upload.collections.alpha]\ncollection="Shared"\n'
+                'creator="Artist A"\n'
+            )
+            path.write_text(original)
+            with (
+                patch.dict("os.environ", {"GIT": str(root)}),
+                redirect_stdout(io.StringIO()),
+            ):
+                migration.upgrade(path)
+                before = path.read_bytes()
+                migration.upgrade(path)
+            new = tomllib.loads(path.read_text())
+            self.assertEqual(list(new["upload"]["prefix"]), ["alpha", "zulu"])
+            new["upload"]["collections"] = new["upload"].pop("prefix")
+            self.assertEqual(new, tomllib.loads(original))
+            backups = list((root / ".bak").iterdir())
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(), original)
+            self.assertEqual(stat.S_IMODE(backups[0].stat().st_mode), 0o600)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(list(repo.iterdir()), [path])
+
+    def test_conflicting_mapping_tables_are_rejected_without_writes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            original = (
+                '[upload]\nshows_root="/shows"\n'
+                '[upload.prefix]\na="A"\n'
+                '[upload.collections]\nb="B"\n'
+            )
+            path.write_text(original)
+            with self.assertRaises(ValueError):
+                save_collection(path, "c", "C")
+            with self.assertRaises(ValueError):
+                migration.upgrade(path, backup_dir=path.parent / ".bak")
+            self.assertEqual(path.read_text(), original)
+            self.assertFalse((path.parent / ".bak").exists())

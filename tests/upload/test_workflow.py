@@ -38,7 +38,7 @@ class WorkflowTests(unittest.TestCase):
         config = root / "config.toml"
         config.write_text(
             f'[upload]\nshows_root = "{root}"\nupload_workers = 1\n'
-            '[upload.collections]\nartist = "ExampleArtistCollection"\n'
+            '[upload.prefix]\nartist = "ExampleArtistCollection"\n'
         )
         return folder, ["--config", str(config), ID]
 
@@ -219,7 +219,7 @@ class UpdatedWorkflowTests(unittest.TestCase):
             path = folder.parent.parent / "config.toml"
             text = path.read_text().replace(
                 'artist = "ExampleArtistCollection"',
-                "[upload.collections.artist]\n"
+                "[upload.prefix.artist]\n"
                 'collection = "ExampleArtistCollection"\n'
                 'creator = "Saved Artist"',
             )
