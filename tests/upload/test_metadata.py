@@ -288,3 +288,17 @@ class MetadataRefreshTests(TestCase):
         self.assertEqual(reviewed["collection"], "ArtistCollection")
         self.assertEqual(cli.transport_metadata(payload), payload)
         self.assertNotIn("collection_added", payload)
+
+    def test_scanner_omits_only_the_development_number(self):
+        cases = (
+            ("0.2.0.dev0", "lma-tools v0.2.0.dev"),
+            ("0.2.0.dev12", "lma-tools v0.2.0.dev"),
+            ("0.2.0", "lma-tools v0.2.0"),
+            ("0.2.10", "lma-tools v0.2.10"),
+        )
+        for package_version, expected in cases:
+            with self.subTest(version=package_version):
+                with patch.object(
+                    cli, "version", return_value=package_version
+                ):
+                    self.assertEqual(cli.scanner_name(), expected)

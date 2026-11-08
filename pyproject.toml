@@ -1,6 +1,6 @@
 [project]
 name = "lma-tools"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Live Music Archive upload and recording report tools"
 readme = "README.md"
 requires-python = ">=3.11"

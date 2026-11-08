@@ -70,6 +70,12 @@ from .remote import (
 )
 
 
+def scanner_name():
+    """Keep normalized package versions and readable Scanner labels."""
+    release = re.sub(r"\.dev\d+$", ".dev", version("lma-tools"))
+    return f"lma-tools v{release}"
+
+
 def transport_metadata(metadata):
     """Encode reviewed plain text for Archive's HTML description field."""
     payload = dict(metadata)
@@ -1111,7 +1117,7 @@ def run_upload(args, directory, project, config):
                 f"on {metadata['date']}"
             )
         metadata.update(collection=collection or "", runtime=runtime)
-        metadata["scanner"] = f"lma-tools v{version('lma-tools')}"
+        metadata["scanner"] = scanner_name()
         approved = getattr(args, "approved", None)
         if approved:
             identifier, metadata = approved["identifier"], approved["metadata"]
