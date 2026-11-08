@@ -95,6 +95,7 @@ Both commands select config independently of the current directory:
 Upload requires config. Report can use generic defaults if its default file is
 absent. An explicitly selected missing file is an error. Keep config,
 credentials, recordings and upload logs out of Git; config is Git-ignored.
+Mode `600` is recommended for private config. Updates preserve its permissions.
 
 Configure Archive credentials before uploading:
 
@@ -134,7 +135,21 @@ lmau band2026-08-17.audience
 A recording output folder needs a band/date-style identifier, TXT notes and WAV
 or FLAC audio. Discovery checks project directories under `shows_root` and
 their immediate output directories. Explicit output paths also work. From
-inside an output folder, the identifier can be omitted.
+inside an output folder, use `lmau .` to select that folder.
+
+With no show argument, `lmau` processes every discovered output folder under
+`shows_root`. Each show gets its own preparation and upload review. Once you
+approve a show, its upload starts in a window of the shared tmux session while
+you review the next. Cancelling batch review leaves already approved uploads
+running. A skipped or failed review does not approve that show. No files are
+moved between your recording directories.
+
+`lmau -p` prepares all discovered shows locally, without starting tmux or
+uploading. `lmau --preview` previews the batch offline. Use an explicit show or
+`lmau .` when you only want one recording. Batch upload workers share one
+`upload_workers` / `-w` transfer limit across shows; assembly verification does
+not consume transfer slots. Preparation workers have their separate CPU limit.
+An explicit show is required for `--clean`, `--notes` and `--identifier`.
 
 Notes begin with artist, date, venue and city, followed by recording notes and
 a `Name <email>` credit. Source and lineage suggestions remain editable; see
@@ -182,6 +197,12 @@ derivation is done. See [Preparation](docs/PREPARATION.md) for cleanup
 safeguards and edge cases.
 
 `--preview` prints the plan without network access, an editor or writes.
+`--dry-run` queries Archive and prints proposed metadata differences, transfer
+counts and eligible cleanup candidates, without preparation, prompts, logs or
+remote writes. WAV inputs show their preparation plan; exact audio upload
+checks require the resulting FLAC files. Ordinary uploads also show transfer
+and selected-deletion counts before the final `UPLOAD` confirmation. Entries
+missing from Archive metadata still require a direct check before transfer.
 Metadata review uses Ctrl-S to accept and Ctrl-C to cancel; execution requires
 typing `UPLOAD`. Existing-item metadata is updated before file transfers. New
 items request both the selected artist collection and `etree`; existing
@@ -346,17 +367,45 @@ assembly or derivation. The protocol reference is [ia-
 multipart](https://github.com/internetarchivecanada/ia-multipart); this package
 implements its own backend using the existing dependencies.
 
+### Post-upload verification
+
+After transfers, a read-only audit checks every selected filename against
+remote MD5 and size, plus the managed item metadata and required collection
+memberships. Unknown or mismatched evidence stops the run before its final
+derive submission; the project log records the failure. Metadata-only and
+runtime-only changes are also checked. Server acceptance alone is not proof
+that the audit passed. Retry the normal command after resolving a mismatch or
+waiting for Archive metadata to catch up.
+
+After a successful audit, Overview shows `verified` for confirmed originals,
+or `deriving` when Archive reports queued/running derive tasks. Task polling
+runs in the background, at most once every 30 seconds per observed run, so it
+does not block terminal rendering. Task errors/pauses remain visible. An
+unavailable task query does not undo verified upload evidence. `verified`
+does not certify playback derivatives.
+
+Batch approvals use private, single-use plans in the upload state directory.
+Each child rechecks local checksums and relevant remote evidence before any
+Archive changes. Changed input requires another review. These plans never
+replace multipart checkpoints or authorize blind retries. Completed plans and
+unused batch slot files are removed after all approved runs have ended.
+
 ### tmux sessions
 
-Interactive uploads and updates open a unique tmux session unless already
-inside tmux. Detach with Ctrl-b then d. Reconnect with `tmux attach -t
-SESSION_NAME`; the session retains a shell and exit status after completion.
-New session names start with the show identifier, without an added prefix. A
-host reboot stops the session.
+Interactive uploads and updates share one tmux session named `lmau`. Its
+Overview window shows all observed uploads; each upload has its own window.
+No-argument batches have a Review window that stays available while approved
+shows upload. Use **Alt-Left / Alt-Right** to move between windows. Ordinary
+arrow keys remain available to the editor; Ctrl-b n/p and Ctrl-b w also work.
+Navigation bindings apply only to this session and preserve existing root
+bindings, including mouse controls.
 
-The first interactive tmux run also starts a detached `lmau` dashboard. View it
-with `tmux attach -t lmau`. Inside tmux, use `tmux switch-client -t lmau`. Each
-show has a compact aggregate byte/rate bar and a count of completed FLACs.
+Detach with Ctrl-b d and reconnect with `tmux attach -t lmau`. Upload windows
+retain a shell and exit status after completion. A host reboot stops them.
+An unrelated existing session named `lmau` is left unchanged; rename it before
+starting these views. Closing Overview does not stop uploads; a later run
+recreates it. Each show has a compact aggregate byte/rate bar and a count of
+completed FLACs.
 Elapsed time covers the current run. Remaining transfer time uses a smoothed
 rate over roughly 30 seconds, excluding previously uploaded bytes from speed.
 It estimates transfer time only; server acknowledgement and derivation can take
@@ -385,12 +434,11 @@ correctness or completion of playback derivatives. Stale runs are labelled.
 Snapshots expire after 24 hours without updates; completed rows already
 retained in the open dashboard remain visible even after their snapshot
 expires. Closing the dashboard does not stop uploads; a later interactive run
-recreates it. Runs started before this version cannot report their progress. An
-existing session named `lmau` is left untouched.
+recreates it.
 
 Listing, help, completion, previews and noninteractive runs execute directly.
 `LMA_NO_TMUX=1` bypasses tmux. Exported variables referenced by upload config
-are forwarded into new sessions.
+are forwarded into new upload windows.
 
 ## Report on recordings
 

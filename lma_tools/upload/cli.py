@@ -27,6 +27,8 @@ from requests import HTTPError, RequestException
 
 from lma_tools.config import config_path, read_section
 
+from .audit import audit_upload, inventory, task_status, transfer_summary
+from .budget import transfer_slot
 from .collections import (
     get_preference,
     save_collection,
@@ -764,6 +766,10 @@ def upload_files(
         return "complete"
 
     def sequential(index, path, metadata):
+        with transfer_slot():
+            return sequential_transfer(index, path, metadata)
+
+    def sequential_transfer(index, path, metadata):
         row = board.row(path, index)
         try:
             state = transfer(
@@ -879,6 +885,7 @@ def upload_files(
                 entries,
                 active_workers,
                 concurrent,
+                budget=True,
                 board=board,
                 tracker=tracker,
             )
@@ -960,6 +967,12 @@ def parser():
     p.add_argument(
         "--notes", type=Path, help="select a specific TXT file in the show"
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="query remote differences without preparing or changing files",
+    )
+    p.add_argument("--approved-plan", type=Path, help=argparse.SUPPRESS)
     p.add_argument(
         "--preview",
         action="store_true",
@@ -1043,7 +1056,7 @@ def run_upload(args, directory, project, config):
             print("Local manifests need attention:")
             for error in report["errors"]:
                 print("  " + error)
-            if args.preview:
+            if args.preview or args.dry_run:
                 raise ValueError("Stale manifests; preview made no changes")
             if input("Type REBUILD to regenerate FFP/MD5 only: ") != "REBUILD":
                 raise ValueError("Manifest repair cancelled")
@@ -1057,7 +1070,7 @@ def run_upload(args, directory, project, config):
     journal = Journal(
         project / f"{identifier}_lma.log",
         identifier,
-        enabled=config.get("log", True) and not args.no_log,
+        enabled=config.get("log", True) and not (args.no_log or args.dry_run),
     )
     metadata = {}
     if args.runtime:
@@ -1086,7 +1099,7 @@ def run_upload(args, directory, project, config):
             or get_preference(config, abbreviation).get("collection")
             or (previous or {}).get("collection")
         )
-        if not collection and not args.preview:
+        if not collection and not (args.preview or args.dry_run):
             collection = input(
                 f"Collection identifier for {abbreviation}: "
             ).strip()
@@ -1099,7 +1112,10 @@ def run_upload(args, directory, project, config):
             )
         metadata.update(collection=collection or "", runtime=runtime)
         metadata["scanner"] = f"lma-tools v{version('lma-tools')}"
-        if not args.preview:
+        approved = getattr(args, "approved", None)
+        if approved:
+            identifier, metadata = approved["identifier"], approved["metadata"]
+        elif not (args.preview or args.dry_run):
             identifier, metadata = edit_review(
                 identifier,
                 metadata,
@@ -1109,6 +1125,12 @@ def run_upload(args, directory, project, config):
             journal = Journal(
                 project / f"{identifier}_lma.log", identifier, journal.enabled
             )
+    if getattr(args, "approved", None):
+        identifier = args.approved["identifier"]
+        metadata = args.approved["metadata"]
+        journal = Journal(
+            project / f"{identifier}_lma.log", identifier, journal.enabled
+        )
     files = (
         [] if (args.runtime or args.metadata or args.clean) else small + flacs
     )
@@ -1122,38 +1144,10 @@ def run_upload(args, directory, project, config):
     if args.preview:
         print("Preview only: no files written, no network requests.")
         return 0
-    if (
-        input("Type UPLOAD to proceed (anything else cancels): ").strip()
-        != "UPLOAD"
-    ):
-        print("Cancelled; no Archive.org changes made. Preparation retained.")
-        return 0
-    journal.append(
-        "run_start",
-        mode="upload-only"
-        if args.upload
-        else "runtime-only"
-        if args.runtime
-        else "metadata-only"
-        if args.metadata
-        else "full",
-        directory=str(directory),
-        metadata=metadata,
-        files=[p.name for p in files],
-        trust_log=args.trust_log,
-        force=args.force,
-    )
     tracker = None
     files_verified = False
-    if files and os.environ.get("LMA_UPLOAD_SESSION"):
-        from .dashboard import ShowProgress
-
-        try:
-            tracker = ShowProgress(
-                identifier, files, os.environ["LMA_UPLOAD_SESSION"]
-            )
-        except OSError:
-            print("Dashboard unavailable; continuing upload.", flush=True)
+    audit_verified = False
+    session = None
     try:
         session = ArchiveSession()
         if not session.access_key or not session.secret_key:
@@ -1168,9 +1162,9 @@ def run_upload(args, directory, project, config):
                 "Item does not exist; run without -u/-r/-m to create it."
             )
         existed = bool(item.exists)
-        replacements, deletions = set(), []
+        replacements, deletions = {}, []
         prior_cleanup = []
-        if existed and not (args.runtime or args.metadata):
+        if existed and not (args.runtime or args.metadata or args.dry_run):
             prior_cleanup = unfinished_cleanup(journal)
             for entry in prior_cleanup:
                 wait_for_deletion(
@@ -1184,7 +1178,17 @@ def run_upload(args, directory, project, config):
             item = session.get_item(
                 identifier, request_kwargs={"timeout": (30, 60)}
             )
-        if existed and not (args.runtime or args.metadata):
+        approved = getattr(args, "approved", None)
+        if approved:
+            from .batch import validate_approval
+
+            validate_approval(approved, item, files, metadata)
+            replacements = {
+                name: tuple(value)
+                for name, value in approved["replacements"].items()
+            }
+            deletions = approved["deletions"]
+        elif existed and not (args.runtime or args.metadata or args.dry_run):
             replacements, deletions = review_remote(
                 item,
                 small + flacs,
@@ -1194,6 +1198,40 @@ def run_upload(args, directory, project, config):
                 replacements_only=args.clean,
                 session=session,
             )
+        if not approved:
+            transfer_summary(item, files, args.force)
+            print(f"  delete: {len(deletions)}")
+        if args.dry_run:
+            from .metadata_review import comparison
+            from .remote import original, pending
+
+            print(comparison(item.metadata, metadata), end="")
+            if not args.no_clean and not (args.runtime or args.metadata):
+                names = {path.name for path in small + flacs}
+                candidates = [
+                    entry["name"]
+                    for entry in item.files
+                    if original(entry)
+                    and entry["name"] not in names
+                    and not pending(journal, entry["name"])
+                ]
+                print(f"  cleanup candidates (unselected): {len(candidates)}")
+                for name in candidates:
+                    print(f"    {name}")
+            print("Dry run only: no local or Archive.org changes made.")
+            return 0
+        if not approved:
+            if (
+                input(
+                    "Type UPLOAD to proceed (anything else cancels): "
+                ).strip()
+                != "UPLOAD"
+            ):
+                print(
+                    "Cancelled; no Archive.org changes made. "
+                    "Preparation retained."
+                )
+                return 0
         journal.append(
             "remote_review",
             replacements=sorted(replacements),
@@ -1226,13 +1264,52 @@ def run_upload(args, directory, project, config):
                 raise ValueError(
                     "Collection is not an existing Archive.org collection."
                 )
-            save_collection(
-                args.config,
-                show_identity(identifier)[0],
-                metadata["collection"],
-                creator=metadata["creator"],
-                genre=config.get("prepared_genre"),
+            if not approved:
+                save_collection(
+                    args.config,
+                    show_identity(identifier)[0],
+                    metadata["collection"],
+                    creator=metadata["creator"],
+                    genre=config.get("prepared_genre"),
+                )
+        if getattr(args, "enqueue", None):
+            args.enqueue(
+                dict(
+                    identifier=identifier,
+                    metadata=metadata,
+                    inventory=inventory(files),
+                    remote_files=item.files,
+                    remote_metadata=item.metadata,
+                    existed=existed,
+                    replacements=replacements,
+                    deletions=deletions,
+                )
             )
+            return 0
+        journal.append(
+            "run_start",
+            mode="upload-only"
+            if args.upload
+            else "runtime-only"
+            if args.runtime
+            else "metadata-only"
+            if args.metadata
+            else "full",
+            directory=str(directory),
+            metadata=metadata,
+            files=[path.name for path in files],
+            trust_log=args.trust_log,
+            force=args.force,
+        )
+        if files and os.environ.get("LMA_UPLOAD_SESSION"):
+            from .dashboard import ShowProgress
+
+            try:
+                tracker = ShowProgress(
+                    identifier, files, os.environ["LMA_UPLOAD_SESSION"]
+                )
+            except OSError:
+                print("Dashboard unavailable; continuing upload.", flush=True)
         if args.clean:
             delete_originals(
                 session,
@@ -1328,17 +1405,33 @@ def run_upload(args, directory, project, config):
                         journal,
                         policy=load_policy(config.get("recovery", {})),
                     )
-                if tracker is not None:
-                    tracker.status("deriving")
+                expected = {} if args.upload else dict(metadata)
+                if not args.upload:
+                    expected["collection"] = [metadata["collection"], "etree"]
+                result = audit_upload(session, identifier, files, expected)
+                journal.append("audit_ok", **result)
+                audit_verified = True
+                print("Post-upload audit: verified.", flush=True)
                 queue_final_derive(session, identifier, journal)
+        if args.runtime or args.metadata:
+            expected = {"runtime": runtime} if args.runtime else metadata
+            result = audit_upload(session, identifier, [], expected)
+            journal.append("audit_ok", **result)
         journal.append("run_ok")
         if tracker is not None:
-            tracker.close("done")
+            state = "verified"
+            try:
+                state = task_status(session, identifier)
+            except (RequestException, ValueError):
+                journal.append("task_status_unavailable")
+            tracker.close(state)
     except BaseException as exc:
         if tracker is not None:
             tracker.close(
                 "cancelled"
                 if isinstance(exc, KeyboardInterrupt)
+                else "audit failed"
+                if files_verified and not audit_verified
                 else "derive failed"
                 if files_verified
                 else "failed"
@@ -1355,12 +1448,22 @@ def run_upload(args, directory, project, config):
             )
         journal.append("run_failed", **data)
         raise
+    finally:
+        if session is not None:
+            session.close()
     print(f"Done: https://archive.org/details/{identifier}")
     return 0
 
 
-def main(argv=None):
+def main(argv=None, *, enqueue=None, approved=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
     args = parser().parse_args(argv)
+    args.enqueue = enqueue
+    args.approved = approved
+    if args.approved_plan:
+        from .batch import consume_plan
+
+        return consume_plan(args.approved_plan)
     if args.retries < 0 or args.retry_sleep < 0:
         raise ValueError("Retry settings cannot be negative.")
     args.config = config_path(args.config)
@@ -1376,6 +1479,7 @@ def main(argv=None):
         and (args.no_log or not config.get("log", True))
         and not (
             args.preview
+            or args.dry_run
             or args.list
             or args.complete is not None
             or args.session_name
@@ -1397,7 +1501,8 @@ def main(argv=None):
                 option
                 for action in parser()._actions
                 for option in action.option_strings
-                if option not in ("--complete", "--session-name")
+                if option
+                not in ("--complete", "--session-name", "--approved-plan")
             ]
         else:
             tokens = output_tokens(scan_outputs(root), root)
@@ -1406,6 +1511,13 @@ def main(argv=None):
         ):
             print(token)
         return 0
+    if args.show is None:
+        if args.session_name:
+            print("Review")
+            return 0
+        from .batch import run_batch
+
+        return run_batch(argv or [], args, config)
     if args.clean:
         directory, project = resolve_cleanup(args.show, root)
     else:
@@ -1416,8 +1528,15 @@ def main(argv=None):
     if directory == project:
         raise ValueError("Project log must be outside the output folder.")
     with show_lock(directory):
-        if args.prepare or not (
-            args.upload or args.runtime or args.metadata or args.clean
+        if (
+            not approved
+            and not args.dry_run
+            and (
+                args.prepare
+                or not (
+                    args.upload or args.runtime or args.metadata or args.clean
+                )
+            )
         ):
             from .prepare import prepare_show
 
@@ -1455,6 +1574,35 @@ def main(argv=None):
                         "Preview only: no files written, no network requests."
                     )
                 return 0
+        if args.dry_run and any(
+            path.suffix.lower() == ".wav" for path in directory.iterdir()
+        ):
+            from .prepare import prepare_show
+
+            prefix, _ = show_identity(args.identifier or directory.name)
+            prepare_show(
+                directory,
+                get_preference(config, prefix),
+                preview=True,
+                notes=args.notes,
+                workers=config.get("prepare_workers"),
+            )
+            from .core import SMALL
+
+            with ArchiveSession() as session:
+                item = session.get_item(
+                    args.identifier or directory.name,
+                    request_kwargs={"timeout": (15, 30)},
+                )
+                small = sorted(
+                    path
+                    for path in directory.iterdir()
+                    if path.is_file() and path.suffix.lower() in SMALL
+                )
+                transfer_summary(item, small, args.force)
+            print("Audio transfer checks require completed preparation.")
+            print("Dry run only: no local or Archive.org changes made.")
+            return 0
         return run_upload(args, directory, project, config)
 
 

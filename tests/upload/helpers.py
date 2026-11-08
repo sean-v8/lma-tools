@@ -83,6 +83,7 @@ def metadata_fixture(self):
                 lma, "edit_review", side_effect=lambda i, m, **kw: (i, m)
             ),
             patch.object(lma, "ArchiveSession", return_value=session),
+            patch.object(lma, "audit_upload", return_value={}),
             patch("builtins.input", return_value="UPLOAD"),
             redirect_stdout(io.StringIO()),
         ):

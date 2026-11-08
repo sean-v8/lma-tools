@@ -21,6 +21,9 @@ from tests.upload.helpers import (
 
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
+        audit = patch.object(lma, "audit_upload", return_value={})
+        audit.start()
+        self.addCleanup(audit.stop)
         preparation = patch(
             "lma_tools.upload.prepare.prepare_show", return_value={}
         )
@@ -87,7 +90,15 @@ class WorkflowTests(unittest.TestCase):
                 patch.object(
                     lma,
                     "ArchiveSession",
-                    side_effect=AssertionError("network forbidden"),
+                    return_value=Mock(
+                        access_key="test",
+                        secret_key="test",
+                        get_item=Mock(
+                            return_value=Mock(
+                                exists=False, files=[], metadata={}
+                            )
+                        ),
+                    ),
                 ),
                 contextlib.redirect_stdout(io.StringIO()),
             ):

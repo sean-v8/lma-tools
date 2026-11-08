@@ -81,7 +81,7 @@ class DashboardTests(unittest.TestCase):
         job = self.job(1)
         self.assertEqual(dashboard.status_text(job), "1/5 completed")
         job["status"] = "deriving"
-        self.assertEqual(dashboard.status_text(job), "1/5 completed, derive")
+        self.assertEqual(dashboard.status_text(job), "1/5 completed, deriving")
         job["status"] = "failed"
         self.assertEqual(dashboard.status_text(job), "1/5 completed, failed")
         self.assertEqual(
@@ -308,21 +308,53 @@ class DashboardTests(unittest.TestCase):
         tracker.begin.assert_called_once_with("one.flac")
         tracker.advance.assert_called_once_with("one.flac", 7)
 
-    def test_dashboard_creation_is_detached_and_existing_session_untouched(
-        self,
-    ):
+    def test_dashboard_creation_uses_scoped_navigation_and_root_bindings(self):
+        def tmux(command, **kwargs):
+            if command[1] == "has-session":
+                return Mock(returncode=1)
+            if command[1] == "list-keys":
+                return Mock(
+                    stdout="bind-key -T root MouseDown1Pane select-pane\n"
+                )
+            return Mock(returncode=0, stdout="")
+
+        with patch.object(launcher.subprocess, "run", side_effect=tmux) as run:
+            launcher.ensure_dashboard()
+        commands = [call.args[0] for call in run.call_args_list]
+        create = next(c for c in commands if c[1] == "new-session")
+        self.assertEqual(
+            create[:5], ["tmux", "new-session", "-d", "-s", "lmau"]
+        )
+        self.assertIn("lma_tools.upload.dashboard", create[-1])
+        self.assertIn(
+            [
+                "tmux",
+                "set-option",
+                "-t",
+                "=lmau",
+                "key-table",
+                "lmau-navigation",
+            ],
+            commands,
+        )
+        source = next(
+            c for c in run.call_args_list if c.args[0][1] == "source-file"
+        )
+        self.assertIn(
+            "-T lmau-navigation MouseDown1Pane", source.kwargs["input"]
+        )
+        self.assertFalse(any("-g" in command for command in commands))
+
+    def test_unrelated_session_is_not_modified(self):
         with patch.object(launcher.subprocess, "run") as run:
-            run.return_value = Mock(returncode=0)
-            launcher.ensure_dashboard()
-            self.assertEqual(run.call_count, 1)
-            run.reset_mock()
-            run.side_effect = [Mock(returncode=1), Mock(returncode=0)]
-            launcher.ensure_dashboard()
-            command = run.call_args.args[0]
-            self.assertEqual(
-                command[:5], ["tmux", "new-session", "-d", "-s", "lmau"]
-            )
-            self.assertIn("lma_tools.upload.dashboard", command[-1])
+            run.side_effect = [
+                Mock(returncode=0),
+                Mock(stdout="@1\tbash\n"),
+                Mock(stdout=""),
+            ]
+            with self.assertRaisesRegex(ValueError, "unrelated"):
+                launcher.ensure_dashboard()
+        self.assertEqual(run.call_count, 3)
 
     def test_session_name_starts_with_show(self):
         name = launcher.cli.tmux_session_name("artist2026-08-17.t-flac2448")

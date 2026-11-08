@@ -41,17 +41,7 @@ def config_names(path):
 
 
 def ensure_dashboard():
-    """Create one detached view; an unrelated existing lmau is left alone."""
-    if (
-        subprocess.run(
-            ["tmux", "has-session", "-t", "=lmau"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        ).returncode
-        == 0
-    ):
-        return
+    """Create or reuse our session without changing unrelated sessions."""
     command = [
         sys.executable,
         "-B",
@@ -60,14 +50,114 @@ def ensure_dashboard():
         "--state-dir",
         str(state_directory()),
     ]
-    result = subprocess.run(
-        ["tmux", "new-session", "-d", "-s", "lmau", shlex.join(command)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        check=False,
+    exists = (
+        subprocess.run(
+            ["tmux", "has-session", "-t", "=lmau"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
     )
-    if result.returncode:
-        print("Dashboard not started; continuing show session.", flush=True)
+    if exists:
+        panes = subprocess.run(
+            [
+                "tmux",
+                "list-panes",
+                "-s",
+                "-t",
+                "=lmau",
+                "-F",
+                "#{window_id}\t#{pane_start_command}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        overview = next(
+            (
+                line.split("\t", 1)[0]
+                for line in panes.splitlines()
+                if "lma_tools.upload.dashboard" in line
+            ),
+            None,
+        )
+        marker = subprocess.run(
+            [
+                "tmux",
+                "show-options",
+                "-qv",
+                "-t",
+                "=lmau",
+                "@lma-tools-session",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        if overview is None and marker != "1":
+            raise ValueError(
+                "An unrelated tmux session is named lmau; "
+                "rename it before starting upload views."
+            )
+        if overview:
+            subprocess.run(
+                ["tmux", "rename-window", "-t", overview, "Overview"],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                [
+                    "tmux",
+                    "new-window",
+                    "-d",
+                    "-t",
+                    "lmau:",
+                    "-n",
+                    "Overview",
+                    shlex.join(command),
+                ],
+                check=True,
+            )
+    else:
+        subprocess.run(
+            [
+                "tmux",
+                "new-session",
+                "-d",
+                "-s",
+                "lmau",
+                "-n",
+                "Overview",
+                shlex.join(command),
+            ],
+            check=True,
+        )
+    # Preserve user root bindings, including mouse controls, in our table.
+    bindings = subprocess.run(
+        ["tmux", "list-keys", "-T", "root"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    bindings = "\n".join(
+        line.replace(" -T root ", " -T lmau-navigation ", 1)
+        for line in bindings.splitlines()
+    )
+    if bindings:
+        subprocess.run(
+            ["tmux", "source-file", "-"],
+            input=bindings + "\n",
+            text=True,
+            check=True,
+        )
+    for command in (
+        ["set-option", "-t", "=lmau", "@lma-tools-session", "1"],
+        ["set-option", "-t", "=lmau", "key-table", "lmau-navigation"],
+        ["bind-key", "-T", "lmau-navigation", "M-Left", "previous-window"],
+        ["bind-key", "-T", "lmau-navigation", "M-Right", "next-window"],
+    ):
+        subprocess.run(["tmux", *command], check=True)
 
 
 def launch(argv):
@@ -76,40 +166,14 @@ def launch(argv):
         return cli.main(argv)
     direct = (
         args.preview
+        or args.dry_run
         or args.list
         or args.complete is not None
         or args.session_name
-        or os.environ.get("TMUX")
         or os.environ.get("LMA_NO_TMUX") == "1"
         or not (sys.stdin.isatty() and sys.stdout.isatty())
     )
     if direct:
-        if (
-            os.environ.get("TMUX")
-            and not (args.preview or args.list or args.session_name)
-            and args.complete is None
-            and os.environ.get("LMA_NO_TMUX") != "1"
-            and sys.stdin.isatty()
-            and sys.stdout.isatty()
-            and shutil.which("tmux")
-        ):
-            ensure_dashboard()
-            result = subprocess.run(
-                ["tmux", "display-message", "-p", "#{session_name}"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                previous = os.environ.get("LMA_UPLOAD_SESSION")
-                os.environ["LMA_UPLOAD_SESSION"] = result.stdout.strip()
-                try:
-                    return cli.main(argv)
-                finally:
-                    if previous is None:
-                        os.environ.pop("LMA_UPLOAD_SESSION", None)
-                    else:
-                        os.environ["LMA_UPLOAD_SESSION"] = previous
         return cli.main(argv)
     if not shutil.which("tmux"):
         raise ValueError(
@@ -118,35 +182,31 @@ def launch(argv):
         )
     path = config_path(args.config)
     cli.load_config(path)
-    names = config_names(path)
+    config_names(path)
     # Resolve the identifier with the same logic as the actual upload.
     from contextlib import redirect_stdout
     from io import StringIO
 
     with redirect_stdout(StringIO()) as output:
         cli.main([*argv, "--session-name"])
-    base = output.getvalue().strip()
-    session = base
-    number = 2
-    while (
-        subprocess.run(
-            ["tmux", "has-session", "-t", "=" + session],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        ).returncode
-        == 0
-    ):
-        session = f"{base}_{number}"
-        number += 1
-    env_args = []
-    for name in names:
-        env_args.extend(["-e", f"{name}={os.environ[name]}"])
-    env_args.extend(["-e", f"LMA_UPLOAD_SESSION={session}"])
-    # A tmux server started earlier may have different XDG defaults.
-    env_args.extend(["-e", f"LMA_UPLOAD_STATE_DIR={state_directory()}"])
+    name = output.getvalue().strip()
     ensure_dashboard()
-    print(f"Starting tmux session {session} (detach: Ctrl-b d).", flush=True)
+    start_window(name, argv, path)
+    print("Starting tmux session lmau (detach: Ctrl-b d).", flush=True)
+    if os.environ.get("TMUX"):
+        subprocess.run(["tmux", "switch-client", "-t", "=lmau"], check=True)
+        return 0
+    os.execvp("tmux", ["tmux", "attach-session", "-t", "=lmau"])
+
+
+def start_window(name, argv, path, *, select=True):
+    """Give each upload its own terminal in the shared upload session."""
+    names = config_names(path)
+    env_args = []
+    for variable in names:
+        env_args.extend(["-e", f"{variable}={os.environ[variable]}"])
+    env_args.extend(["-e", f"LMA_UPLOAD_SESSION={name}"])
+    env_args.extend(["-e", f"LMA_UPLOAD_STATE_DIR={state_directory()}"])
     command = [
         sys.executable,
         "-B",
@@ -162,23 +222,21 @@ def launch(argv):
         + 'Session retained; type exit to close it.\\n" "$status"; '
         + "exec /bin/bash -i"
     )
-    os.execvp(
+    command = [
         "tmux",
-        [
-            "tmux",
-            "new-session",
-            "-s",
-            session,
-            "-c",
-            os.getcwd(),
-            *env_args,
-            "/bin/bash",
-            "--noprofile",
-            "--norc",
-            "-c",
-            script,
-        ],
-    )
+        "new-window",
+        "-t",
+        "lmau:",
+        "-n",
+        name,
+        "-c",
+        os.getcwd(),
+        *env_args,
+    ]
+    if not select:
+        command.append("-d")
+    command.extend(["/bin/bash", "--noprofile", "--norc", "-c", script])
+    subprocess.run(command, check=True)
 
 
 def main():

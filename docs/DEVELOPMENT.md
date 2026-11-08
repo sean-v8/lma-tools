@@ -159,8 +159,10 @@ metrics share column widths; long labels shorten in the middle.
 Routine terminal start/finish messages are suppressed, while errors and
 recovery notices remain visible. Redirected output uses plain status lines.
 
-Show sessions start with the identifier. The separate `lmau` dashboard reads
-private atomic status snapshots. These snapshots are display-only and never
+The shared `lmau` session contains Overview, review and upload windows.
+A session-local key table copies root bindings and adds Alt-Left/Alt-Right.
+The dashboard reads private atomic status snapshots. These snapshots are
+display-only and never
 authorize upload skips or retries; the upload log holds resumable part state.
 
 Dashboard bytes cover selected files, including small files in normal mode. The
@@ -243,3 +245,28 @@ of targeting a particular test count.
 
 The upload/report modules are `lma_tools.upload` and `lma_tools.report`.
 Installed commands are `lma-upload`/`lmau` and `lma-report`/`lmar`.
+
+## Batch approval and verification
+
+No show argument scans the configured root; explicit `.` selects the current
+output directory. Batch preparation remains local. Batch uploads finish each
+review before starting an approved child in a detached upload window, then
+continue to the next review. Children have independent terminals and sessions
+for HTTP requests. File locks on private batch slots bound simultaneous
+transfers across processes. Assembly checks do not reserve transfer slots.
+
+Approvals are private JSON plans under the upload state directory. A child
+claims its plan once, rechecks the local inventory and relevant remote file
+and metadata evidence, and skips interactive review. Changes invalidate the
+approval. The parent releases its show lock before launching the child.
+Cancellation stops new reviews without signalling previously approved shows.
+
+Online dry runs bypass preparation, editors and log writes. Offline previews
+retain their no-network contract. Transfer summaries describe current metadata
+evidence; missing entries still need direct verification during transfer.
+
+The final audit verifies selected original files and managed metadata before
+final derive submission. It retries metadata visibility briefly, then records
+failure without claiming success. A separate task monitor polls authenticated
+read-only task summaries outside the render loop. Verified originals and
+pending derivation are distinct states; playback output is not audited here.

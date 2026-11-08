@@ -370,7 +370,10 @@ class TransferTests(unittest.TestCase):
         )
         self.first_wave = {p.name for p in files} if workers != 1 else set()
         self.barrier = Barrier(3)
-        with patch.object(cli, "ArchiveSession", return_value=self.parent):
+        with (
+            patch.object(cli, "ArchiveSession", return_value=self.parent),
+            patch.object(cli, "audit_upload", return_value={}),
+        ):
             with patch.object(
                 cli, "audio_runtime", side_effect=AssertionError
             ):

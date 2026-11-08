@@ -65,10 +65,15 @@ class IntegrationTests(unittest.TestCase):
                 patch.object(launcher.os, "execvp") as execute,
                 patch.object(launcher, "ensure_dashboard"),
             ):
-                run.side_effect = [Mock(returncode=0), Mock(returncode=1)]
+                run.return_value = Mock(returncode=0)
                 launcher.launch(argv)
-            command = execute.call_args.args[1]
-            self.assertIn("lma_band_timestamp_2", command)
+            self.assertEqual(
+                execute.call_args.args[1],
+                ["tmux", "attach-session", "-t", "=lmau"],
+            )
+            command = run.call_args.args[0]
+            self.assertEqual(command[:2], ["tmux", "new-window"])
+            self.assertIn("lma_band_timestamp", command)
             self.assertIn(f"RECORDINGS={tmp}", command)
             self.assertNotIn("UNEXPORTED_VIEW_VALUE", " ".join(command))
             script = command[-1]
@@ -81,7 +86,6 @@ class IntegrationTests(unittest.TestCase):
             (["--preview"], {}),
             (["--list"], {}),
             (["--complete", "x"], {}),
-            ([], {"TMUX": "existing"}),
             ([], {"LMA_NO_TMUX": "1"}),
         ):
             with (
@@ -95,26 +99,28 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(launcher.launch(arguments), 7)
                 run.assert_called_once_with(arguments)
 
-    def test_inside_tmux_tracks_actual_session_and_restores_environment(self):
-        with (
-            patch.dict(
-                os.environ, {"TMUX": "socket", "PATH": "/bin"}, clear=True
-            ),
-            patch.object(launcher.sys.stdin, "isatty", return_value=True),
-            patch.object(launcher.sys.stdout, "isatty", return_value=True),
-            patch.object(launcher.shutil, "which", return_value="/bin/tmux"),
-            patch.object(launcher, "ensure_dashboard") as ensure,
-            patch.object(
-                launcher.subprocess,
-                "run",
-                return_value=Mock(returncode=0, stdout="artist-session\n"),
-            ),
-            patch.object(cli, "main") as run,
-        ):
-            run.side_effect = lambda args: os.environ["LMA_UPLOAD_SESSION"]
-            self.assertEqual(launcher.launch([]), "artist-session")
-            self.assertNotIn("LMA_UPLOAD_SESSION", os.environ)
-            ensure.assert_called_once()
+    def test_inside_tmux_switches_to_shared_upload_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text(f'[upload]\nshows_root = "{tmp}"\n')
+            with (
+                patch.dict(os.environ, {"TMUX": "socket"}),
+                patch.object(launcher.sys.stdin, "isatty", return_value=True),
+                patch.object(launcher.sys.stdout, "isatty", return_value=True),
+                patch.object(launcher.shutil, "which", return_value="/tmux"),
+                patch.object(launcher, "ensure_dashboard"),
+                patch.object(launcher, "start_window") as window,
+                patch.object(launcher.subprocess, "run") as run,
+                patch.object(
+                    cli, "main", side_effect=lambda a: print("Review")
+                ),
+            ):
+                self.assertEqual(launcher.launch(["--config", str(path)]), 0)
+                window.assert_called_once()
+                self.assertEqual(window.call_args.args[0], "Review")
+                run.assert_called_once_with(
+                    ["tmux", "switch-client", "-t", "=lmau"], check=True
+                )
 
     def test_missing_config_exports(self):
         with tempfile.TemporaryDirectory() as tmp:

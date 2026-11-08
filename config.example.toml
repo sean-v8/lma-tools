@@ -1,6 +1,7 @@
 [upload]
 shows_root = "/path/to/shows"
 log = true
+# Shared across uploads when reviewing a no-argument batch.
 upload_workers = 3
 # Preparation defaults to one worker per logical CPU, capped by track count.
 # Uncomment to limit simultaneous conversion/tagging jobs on this machine.
@@ -24,7 +25,7 @@ timeout = 30.0
 view_batch_size = 100
 exclude_zero_views = true
 
-# Keep per-collection preferences after all basic upload/report settings.
+# Keep per-prefix preferences after all basic upload/report settings.
 # Replace this generic prefix and values with your approved preferences.
 [upload.prefix.band]
 collection = "ArchiveCollection"

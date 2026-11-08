@@ -1,5 +1,9 @@
 # Preparation and cleanup
 
+With no show argument, `lmau` processes all discovered shows under
+`shows_root`; use `lmau .` for the current output folder. `lmau -p` prepares
+all discovered shows without uploading or starting tmux.
+
 Normal `lmau` runs prepare local audio before Archive metadata review and
 upload approval. Use a complete show folder. For a partial folder or an already
 prepared subset, use `-u` against an existing item instead.

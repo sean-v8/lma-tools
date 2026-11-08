@@ -14,6 +14,7 @@ from uuid import uuid4
 from tqdm import tqdm
 
 from .progress import OrderedProgress, SharedColumns
+from .tasks import TaskMonitor
 
 LIVE = {"checking", "uploading", "deriving"}
 
@@ -47,7 +48,10 @@ class DashboardJobs:
             job["rate"] = rate if job["status"] in LIVE else 0
             self.jobs[key] = job
         for job in self.jobs.values():
-            if job["status"] in LIVE and now - job["heartbeat"] > 10:
+            if (
+                job["status"] in {"checking", "uploading"}
+                and now - job["heartbeat"] > 10
+            ):
                 job.update(status="stale", rate=0)
         return sorted(self.jobs.values(), key=lambda job: job["started"])
 
@@ -57,7 +61,7 @@ def total_progress(jobs):
     included = [
         job
         for job in jobs
-        if job["status"] in LIVE | {"done", "derive failed"}
+        if job["status"] in LIVE | {"done", "verified", "derive failed"}
     ]
     total = {
         key: sum(job[key] for job in included)
@@ -100,11 +104,7 @@ def status_text(job, counter_width=0):
     state = job["status"]
     if state == "uploading":
         return text
-    return (
-        text
-        + ", "
-        + {"checking": "check", "deriving": "derive"}.get(state, state)
-    )
+    return text + ", " + {"checking": "check"}.get(state, state)
 
 
 def state_directory():
@@ -248,7 +248,7 @@ def read_jobs(directory, now=None):
             if now - data["heartbeat"] > 86400:
                 path.unlink(missing_ok=True)
                 continue
-            if data["status"] in ("checking", "uploading", "deriving"):
+            if data["status"] in ("checking", "uploading"):
                 if now - data["heartbeat"] > 10:
                     data["status"] = "stale"
                     data["rate"] = 0
@@ -273,13 +273,14 @@ def dashboard(directory):
     separator.delay = 0
     columns = SharedColumns()
     history = DashboardJobs()
+    monitor = TaskMonitor()
     previous_dimensions = None
     if not sys.stderr.isatty():
         raise ValueError("The upload dashboard needs a terminal.")
     sys.stderr.write("\x1b[?25l")
     try:
         while True:
-            jobs = history.update(read_jobs(directory))
+            jobs = history.update(monitor.update(read_jobs(directory)))
             jobs = [total_progress(jobs), *jobs]
             counter_width = max(
                 len(f"{job['completed']}/{job['files']}") for job in jobs
@@ -353,6 +354,7 @@ def dashboard(directory):
     except KeyboardInterrupt:
         pass
     finally:
+        monitor.close()
         separator.close()
         for bar in bars.values():
             bar.close()

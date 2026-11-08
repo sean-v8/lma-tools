@@ -336,6 +336,7 @@ class RecoveryTests(unittest.TestCase):
             patch.object(cli, "ArchiveSession", return_value=self.session),
             patch.object(cli, "audio_runtime", side_effect=AssertionError),
             patch("builtins.input", return_value="UPLOAD"),
+            patch.object(cli, "audit_upload", return_value={}),
         ):
             self.assertEqual(cli.main(["-u", "--config", str(config), ID]), 0)
         item.modify_metadata.assert_not_called()
