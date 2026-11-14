@@ -12,7 +12,6 @@ from requests import RequestException
 
 from .audit import inventory
 from .dashboard import state_directory
-from .parallel import upload_workers
 
 
 def file_evidence(entries):
@@ -68,7 +67,6 @@ def consume_plan(path):
     path.rename(claimed)
     try:
         payload = json.loads(claimed.read_text(encoding="utf-8"))
-        os.environ["LMA_UPLOAD_BATCH_SLOTS"] = str(path.parent / "slots")
         return cli.main(payload["argv"], approved=payload["approval"])
     finally:
         claimed.unlink(missing_ok=True)
@@ -96,15 +94,7 @@ def run_batch(argv, args, config):
         state.mkdir(mode=0o700, parents=True, exist_ok=True)
         directory = Path(tempfile.mkdtemp(prefix="batch-", dir=state))
         (directory / ".reviewing").touch(mode=0o600)
-        slots = directory / "slots"
-        slots.mkdir(mode=0o700)
-        workers = upload_workers(
-            args.workers
-            if args.workers is not None
-            else config.get("upload_workers", 3)
-        )
-        for index in range(workers):
-            (slots / f"slot-{index:04d}").touch(mode=0o600)
+
     try:
         return review_outputs(argv, args, config, outputs, directory)
     finally:
@@ -170,15 +160,12 @@ def review_outputs(argv, args, config, outputs, directory):
 
 
 def cleanup_batch(directory):
-    """Remove transfer slots only after review and every child have ended."""
+    """Remove approval state after review and every child have ended."""
     if (directory / ".reviewing").exists() or any(
         directory.glob("approved-*")
     ):
         return
     try:
-        for slot in (directory / "slots").glob("slot-*"):
-            slot.unlink()
-        (directory / "slots").rmdir()
         directory.rmdir()
     except OSError:
         pass

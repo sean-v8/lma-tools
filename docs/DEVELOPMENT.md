@@ -61,8 +61,9 @@ See [source inference](SOURCE_PARSING.md) for source and lineage rules.
 
 ## Transfers, recovery and derivation
 
-The worker limit bounds concurrent file transfers, including small files and
-FLACs. Each active worker owns an independent Archive session. A fatal error
+The worker limit bounds concurrent file transfers per show, including small
+files and FLACs. Batch shows use independent limits, not a shared pool. Each
+active worker owns an independent Archive session. A fatal error
 stops scheduling new files and drains existing workers before the run exits.
 Cancellation interrupts body reads and retry waits; a blocked request may still
 need to reach its socket timeout.

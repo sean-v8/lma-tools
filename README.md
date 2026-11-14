@@ -149,9 +149,10 @@ moved between your recording directories.
 
 `lmau -p` prepares all discovered shows locally, without starting tmux or
 uploading. `lmau --preview` previews the batch offline. Use an explicit show or
-`lmau .` when you only want one recording. Batch upload workers share one
-`upload_workers` / `-w` transfer limit across shows; assembly verification does
-not consume transfer slots. Preparation workers have their separate CPU limit.
+`lmau .` when you only want one recording. Each show has its own
+`upload_workers` / `-w` transfer limit, including in batch mode. For example,
+three shows with 12 workers each can transfer up to 36 files concurrently.
+Preparation workers have their separate CPU limit.
 An explicit show is required for `--clean`, `--notes` and `--identifier`.
 
 `--yes` accepts valid preparation and metadata defaults, repairs manifests

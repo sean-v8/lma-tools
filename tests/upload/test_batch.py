@@ -1,18 +1,19 @@
-"""Approved batches preserve review boundaries and share transfer slots."""
+"""Approved batches preserve review boundaries and independent show workers."""
 
 import io
 import json
 import os
 import tempfile
-import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from pathlib import Path
-from threading import Event, Lock, Thread
+from threading import Barrier, Lock
 from unittest.mock import Mock, patch
 
-from lma_tools.upload import batch, budget, cli, launcher
+from lma_tools.upload import batch, cli, launcher
 from lma_tools.upload.audit import inventory
+from lma_tools.upload.parallel import run_parallel
 
 from .helpers import ID, make_show, metadata_fixture
 
@@ -256,33 +257,37 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(result, 130)
         run.assert_not_called()
 
-    def test_slots_bound_concurrent_transfers_and_cancel_waiters(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            for index in range(2):
-                (directory / f"slot-{index}").touch()
-            lock = Lock()
-            counts = {"active": 0, "peak": 0}
+    def test_each_show_has_its_own_full_worker_limit(self):
+        barrier = Barrier(4)
+        lock = Lock()
+        active = [0, 0]
+        peaks = [0, 0]
+        combined_peak = 0
 
-            def work():
-                with budget.transfer_slot():
-                    with lock:
-                        counts["active"] += 1
-                        counts["peak"] = max(counts["peak"], counts["active"])
-                    time.sleep(0.02)
-                    with lock:
-                        counts["active"] -= 1
+        def transfer(show, index, slot, board, cancel):
+            nonlocal combined_peak
+            with lock:
+                active[show] += 1
+                peaks[show] = max(peaks[show], active[show])
+                combined_peak = max(combined_peak, sum(active))
+            try:
+                barrier.wait(timeout=5)
+            finally:
+                with lock:
+                    active[show] -= 1
 
-            with patch.dict(os.environ, LMA_UPLOAD_BATCH_SLOTS=str(directory)):
-                threads = [Thread(target=work) for _ in range(6)]
-                for thread in threads:
-                    thread.start()
-                for thread in threads:
-                    thread.join(timeout=2)
-                self.assertFalse(any(thread.is_alive() for thread in threads))
-                self.assertEqual(counts["peak"], 2)
-                cancel = Event()
-                cancel.set()
-                with self.assertRaises(Exception):
-                    with budget.transfer_slot(cancel):
-                        self.fail("Cancelled transfer acquired a slot")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            shows = [
+                pool.submit(
+                    run_parallel,
+                    [(show, index) for index in range(2)],
+                    2,
+                    transfer,
+                )
+                for show in range(2)
+            ]
+            for future in shows:
+                future.result(timeout=10)
+        self.assertEqual(peaks, [2, 2])
+        self.assertEqual(combined_peak, 4)
+        self.assertEqual(active, [0, 0])

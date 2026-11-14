@@ -3,7 +3,6 @@
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from threading import Event
 
-from .budget import transfer_slot
 from .progress import ProgressBoard
 
 
@@ -13,9 +12,7 @@ def upload_workers(value):
     return value
 
 
-def run_parallel(
-    entries, workers, transfer, board=None, tracker=None, *, budget=False
-):
+def run_parallel(entries, workers, transfer, board=None, tracker=None):
     board = board if board is not None else ProgressBoard(tracker=tracker)
     entries = iter(entries)
     cancel = Event()
@@ -28,11 +25,6 @@ def run_parallel(
         if halt.is_set():
             return
         try:
-            if budget:
-                with transfer_slot(cancel):
-                    if halt.is_set():
-                        return
-                    return transfer(*entry, slot, board, cancel)
             return transfer(*entry, slot, board, cancel)
         except BaseException:
             halt.set()

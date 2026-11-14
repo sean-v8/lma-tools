@@ -28,7 +28,6 @@ from requests import HTTPError, RequestException
 from lma_tools.config import config_path, read_section
 
 from .audit import audit_upload, inventory, task_status, transfer_summary
-from .budget import transfer_slot
 from .collections import (
     get_preference,
     save_collection,
@@ -766,10 +765,6 @@ def upload_files(
         return "complete"
 
     def sequential(index, path, metadata):
-        with transfer_slot():
-            return sequential_transfer(index, path, metadata)
-
-    def sequential_transfer(index, path, metadata):
         row = board.row(path, index)
         try:
             state = transfer(
@@ -885,7 +880,6 @@ def upload_files(
                 entries,
                 active_workers,
                 concurrent,
-                budget=True,
                 board=board,
                 tracker=tracker,
             )
