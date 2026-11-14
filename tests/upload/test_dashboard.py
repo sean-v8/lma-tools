@@ -331,7 +331,7 @@ class DashboardTests(unittest.TestCase):
                 "tmux",
                 "set-option",
                 "-t",
-                "=lmau",
+                "=lmau:",
                 "key-table",
                 "lmau-navigation",
             ],
@@ -392,3 +392,24 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(stream.getvalue().count("\x1b[2J\x1b[H"), 2)
         self.assertIn("TOTAL", stream.getvalue())
         self.assertTrue(stream.getvalue().endswith("\x1b[?25h"))
+
+    def test_existing_session_uses_explicit_session_targets_for_options(self):
+        def tmux(command, **kwargs):
+            if command[1] == "list-panes":
+                return Mock(
+                    stdout="@1\tpython -m lma_tools.upload.dashboard\n"
+                )
+            if command[1] == "show-options":
+                return Mock(stdout="1\n")
+            return Mock(returncode=0, stdout="")
+
+        with patch.object(launcher.subprocess, "run", side_effect=tmux) as run:
+            launcher.ensure_dashboard()
+        checked = []
+        for call in run.call_args_list:
+            command = call.args[0]
+            if command[1] in {"list-panes", "show-options", "set-option"}:
+                self.assertEqual(command[command.index("-t") + 1], "=lmau:")
+                checked.append(command[1])
+        self.assertIn("show-options", checked)
+        self.assertIn("set-option", checked)

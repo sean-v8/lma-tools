@@ -66,7 +66,7 @@ def ensure_dashboard():
                 "list-panes",
                 "-s",
                 "-t",
-                "=lmau",
+                "=lmau:",
                 "-F",
                 "#{window_id}\t#{pane_start_command}",
             ],
@@ -88,7 +88,7 @@ def ensure_dashboard():
                 "show-options",
                 "-qv",
                 "-t",
-                "=lmau",
+                "=lmau:",
                 "@lma-tools-session",
             ],
             capture_output=True,
@@ -152,8 +152,8 @@ def ensure_dashboard():
             check=True,
         )
     for command in (
-        ["set-option", "-t", "=lmau", "@lma-tools-session", "1"],
-        ["set-option", "-t", "=lmau", "key-table", "lmau-navigation"],
+        ["set-option", "-t", "=lmau:", "@lma-tools-session", "1"],
+        ["set-option", "-t", "=lmau:", "key-table", "lmau-navigation"],
         ["bind-key", "-T", "lmau-navigation", "M-Left", "previous-window"],
         ["bind-key", "-T", "lmau-navigation", "M-Right", "next-window"],
     ):
