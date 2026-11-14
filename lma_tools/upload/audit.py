@@ -35,13 +35,11 @@ def transfer_summary(item, files, force=False):
         else:
             action = "replace"
         groups[action].append(name)
-    print("Transfer summary (current remote metadata):")
     for action, names in groups.items():
         print(f"  {action}: {len(names)}")
         if action != "skip":
             for name in names:
                 print(f"    {name}")
-    print("  Missing metadata entries are checked again before transfer.")
     return groups
 
 

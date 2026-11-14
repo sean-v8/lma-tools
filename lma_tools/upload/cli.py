@@ -255,8 +255,6 @@ def resolve_cleanup(target, root):
 
 def review_text(identifier, metadata):
     lines = [
-        "# Ctrl-S accepts; Ctrl-C cancels. No review file is written.",
-        "# Identifier prefix and collection are independent.",
         f"identifier = {json.dumps(identifier)}",
         "",
         "[metadata]",
@@ -307,17 +305,12 @@ def edit_review(identifier, metadata, *, history=True, yes=False):
     from .ui import edit_document
 
     remote = snapshot(identifier)
-    note = "Fresh TXT defaults; saved collection naming retained."
     if history and remote == {}:
         print("Checking recent collection naming...", flush=True)
-        metadata, note = suggest(identifier, metadata)
+        metadata, _ = suggest(identifier, metadata)
     document = (
-        "# "
-        + note
-        + "\n"
-        + comparison(remote, metadata)
-        + review_text(identifier, metadata)
-    )
+        comparison(remote, metadata) if remote != {} else ""
+    ) + review_text(identifier, metadata)
     result = (
         parse_review(document)
         if yes
@@ -325,7 +318,8 @@ def edit_review(identifier, metadata, *, history=True, yes=False):
     )
     if result[0] != identifier:
         remote = snapshot(result[0])
-    print(comparison(remote, result[1]), end="")
+    if remote != {}:
+        print(comparison(remote, result[1]), end="")
     return result
 
 
@@ -1159,9 +1153,6 @@ def run_upload(args, directory, project, config):
     print(f"Output folder: {directory}\nProject root: {project}")
     print(f"Destination: https://archive.org/details/{identifier}")
     print(review_text(identifier, metadata))
-    print(
-        f"{len(files)} selected files; runtime: {runtime or 'unchanged (-u)'}"
-    )
     print("Log: " + (str(journal.path) if journal.enabled else "disabled"))
     if args.preview:
         print("Preview only: no files written, no network requests.")

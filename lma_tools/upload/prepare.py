@@ -311,11 +311,7 @@ def _review_tags(lines, tags, table):
 
 def review_text(plan):
     """Render editable TOML without creating a review file."""
-    lines = ["# Ctrl-S accepts; Ctrl-C cancels."]
-    if "disc_total" in plan:
-        lines.append(
-            "# Integer discs inherit disc_total; n/total overrides one track."
-        )
+    lines = []
     for key, value in plan.items():
         if key not in {"tracks", "redundant_wavs", "tags"}:
             lines.append(f"{key} = {json.dumps(value, ensure_ascii=False)}")
@@ -835,7 +831,6 @@ def prepare_show(
     for path in sorted(directory.iterdir()):
         if path.suffix.lower() in {".wav", ".flac", ".jpg"}:
             document += "# " + json.dumps(path.name) + "\n"
-    document += "# Rebuild canonical FFP/MD5 after final tagging.\n"
     for path in sorted(directory.iterdir()):
         if path.suffix.lower() in {".ffp", ".md5"} and path.name not in {
             directory.name + ".ffp",
@@ -843,7 +838,6 @@ def prepare_show(
         }:
             document += "# Remove superseded local manifest: "
             document += json.dumps(path.name) + "\n"
-    document += "# WAV removal requires successful decoded-PCM verification.\n"
     if preview:
         print(document, end="")
         return plan
