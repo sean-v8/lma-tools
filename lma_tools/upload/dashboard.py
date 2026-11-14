@@ -45,7 +45,13 @@ class DashboardJobs:
                 weight = -math.expm1(-(job["heartbeat"] - heartbeat) / 30)
                 rate += weight * (job["rate"] - rate)
             self.samples[key] = job["heartbeat"], rate
-            job["rate"] = rate if job["status"] in LIVE else 0
+            job["rate"] = (
+                job["rate"]
+                if job.get("transfer_finished")
+                else rate
+                if job["status"] in LIVE
+                else 0
+            )
             self.jobs[key] = job
         for job in self.jobs.values():
             if (
@@ -72,7 +78,11 @@ def total_progress(jobs):
         started="total",
         identifier="TOTAL",
         elapsed=elapsed_time(included),
-        rate=sum(job["rate"] for job in included if job["status"] in LIVE),
+        rate=sum(
+            job["rate"]
+            for job in included
+            if job["status"] in LIVE or job.get("transfer_finished")
+        ),
         status=f"{running} running"
         if running
         else "derive failed"
@@ -127,6 +137,8 @@ class ShowProgress:
         self.active = {}
         self.partial = {}
         self.wire = 0
+        self.transfer_started = None
+        self.last_transfer = None
         self.lock = RLock()
         self.stop = Event()
         self.data = {
@@ -165,7 +177,16 @@ class ShowProgress:
                 for n, size in self.active.items()
                 if n not in self.confirmed
             )
+            finished = confirmed + sent >= self.data["total"]
+            if finished:
+                duration = (
+                    self.last_transfer - self.transfer_started
+                    if self.last_transfer is not None
+                    else 0
+                )
+                rate = self.wire / max(duration, 0.001)
             self.data.update(
+                transfer_finished=finished,
                 heartbeat=time.time(),
                 confirmed=confirmed,
                 sent=confirmed + sent,
@@ -188,16 +209,24 @@ class ShowProgress:
     def begin(self, name):
         with self.lock:
             self.active[name] = 0
+            if self.transfer_started is None:
+                self.transfer_started = time.monotonic()
             self.data["status"] = "uploading"
 
     def advance(self, name, size):
         with self.lock:
             self.active[name] = self.active.get(name, 0) + size
             self.wire += size
+            if size > 0:
+                self.last_transfer = time.monotonic()
+                if self.transfer_started is None:
+                    self.transfer_started = self.last_transfer
 
     def resume(self, name, offset):
         with self.lock:
             self.active[name] = offset
+            if offset < self.sizes[name] and self.transfer_started is None:
+                self.transfer_started = time.monotonic()
             self.partial[name] = offset
             self.data["status"] = "uploading"
 

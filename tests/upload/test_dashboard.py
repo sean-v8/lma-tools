@@ -207,6 +207,38 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(data["status"], "cancelled")
             self.assertFalse(tracker.thread.is_alive())
 
+    def test_finished_transfer_average_survives_assembly_and_derivation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            file = root / "one.flac"
+            file.write_bytes(b"x" * 100)
+            tracker = dashboard.ShowProgress(
+                "artist2026-08-17", [file], "show", root / "state"
+            )
+            tracker.stop.set()
+            tracker.thread.join()
+            try:
+                tracker.resume(file.name, 40)
+                tracker.advance(file.name, 60)
+                tracker.transfer_started = 10
+                tracker.last_transfer = 16
+                tracker.publish()
+                self.assertTrue(tracker.data["transfer_finished"])
+                self.assertEqual(tracker.data["rate"], 10)
+                tracker.complete(file.name)
+                tracker.status("deriving")
+                tracker.publish()
+                history = dashboard.DashboardJobs(opened=0)
+                jobs = history.update([tracker.data])
+                self.assertEqual(jobs[0]["rate"], 10)
+                self.assertEqual(dashboard.total_progress(jobs)["rate"], 10)
+                tracker.close("verified")
+                jobs = history.update([tracker.data])
+                self.assertEqual(jobs[0]["rate"], 10)
+                self.assertEqual(dashboard.total_progress(jobs)["rate"], 10)
+            finally:
+                tracker.close("verified")
+
     def test_resumed_parts_credit_bytes_without_counting_wire_or_whole_files(
         self,
     ):

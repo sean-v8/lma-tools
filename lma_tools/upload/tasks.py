@@ -28,7 +28,8 @@ class TaskMonitor:
                     self.pending.add(key)
                 if key in self.states:
                     job["status"] = self.states[key]
-                    job["rate"] = 0
+                    if not job.get("transfer_finished"):
+                        job["rate"] = 0
         return jobs
 
     def _run(self):
