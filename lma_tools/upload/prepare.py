@@ -819,8 +819,9 @@ def prepare_show(
     notes=None,
     workers=None,
     journal=None,
+    yes=False,
 ):
-    """Print/return a draft in preview; otherwise edit, validate and apply.
+    """Preview a draft, or validate/apply with optional interactive review.
 
     notes selects a TXT within directory. config_entry supplies genre; missing
     genre falls back to consistent existing FLAC tags, then blank for review.
@@ -846,8 +847,12 @@ def prepare_show(
     if preview:
         print(document, end="")
         return plan
-    approved = ui.edit_document(
-        document, lambda text: validate_plan(text, directory)
+    approved = (
+        validate_plan(document, directory)
+        if yes
+        else ui.edit_document(
+            document, lambda text: validate_plan(text, directory)
+        )
     )
     if journal:
         journal.append(

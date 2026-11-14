@@ -54,6 +54,7 @@ def review_remote(
     force=False,
     replacements_only=False,
     session=None,
+    unattended=False,
 ):
     """Return per-name replacement permission and approved original entries."""
     entries = {
@@ -106,6 +107,11 @@ def review_remote(
         print(f"  Local:  {size} bytes, MD5 {digest}")
         print(f"  Remote: {entry.get('size')} bytes, MD5 {entry['md5']}")
         if not all_conflicts:
+            if unattended:
+                raise ValueError(
+                    "Remote conflict requires review or explicit --force: "
+                    + path.name
+                )
             choice = (
                 input("Replace [r], replace all conflicts [a], cancel [c]: ")
                 .strip()
@@ -116,7 +122,7 @@ def review_remote(
             all_conflicts = choice == "a"
         replacements[path.name] = (digest, size)
     deletions = []
-    if clean:
+    if clean and not unattended:
         names = {path.name for path in files}
         candidates = []
         for name, entry in sorted(entries.items()):

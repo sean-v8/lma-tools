@@ -270,3 +270,11 @@ final derive submission. It retries metadata visibility briefly, then records
 failure without claiming success. A separate task monitor polls authenticated
 read-only task summaries outside the render loop. Verified originals and
 pending derivation are distinct states; playback output is not audited here.
+
+Batch selection happens before preparation or metadata review. Enter skips,
+process opens the usual reviews, and quit leaves approved children running.
+Offline previews and online dry runs do not add selection prompts.
+`--yes` validates default plans through the same parsers as the editor before
+applying them. It never resolves ambiguous track matches by guesswork. Remote
+conflicts fail without explicit `--force`; cleanup remains unselected, and
+standalone `--clean` requires interactive review.

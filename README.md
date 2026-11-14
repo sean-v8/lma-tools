@@ -138,8 +138,11 @@ their immediate output directories. Explicit output paths also work. From
 inside an output folder, use `lmau .` to select that folder.
 
 With no show argument, `lmau` processes every discovered output folder under
-`shows_root`. Each show gets its own preparation and upload review. Once you
-approve a show, its upload starts in a window of the shared tmux session while
+`shows_root`. Before each show, choose process, skip or quit; Enter skips.
+Skipped shows are left untouched. Processing opens the usual preparation and
+upload reviews; it does not approve them automatically. Previews and dry runs
+remain prompt-free. Once you approve a show, its upload starts in a window of
+the shared tmux session while
 you review the next. Cancelling batch review leaves already approved uploads
 running. A skipped or failed review does not approve that show. No files are
 moved between your recording directories.
@@ -150,6 +153,14 @@ uploading. `lmau --preview` previews the batch offline. Use an explicit show or
 `upload_workers` / `-w` transfer limit across shows; assembly verification does
 not consume transfer slots. Preparation workers have their separate CPU limit.
 An explicit show is required for `--clean`, `--notes` and `--identifier`.
+
+`--yes` accepts valid preparation and metadata defaults, repairs manifests
+when needed, and skips show-selection and upload confirmations. It works for
+one explicit show or the entire batch. Ambiguous preparation or a missing
+collection stops that show. Conflicting remote files still require `--force`,
+which retains its usual re-upload-all behavior. Unattended runs never select
+remote cleanup deletions, even with `--force`; `--yes --clean` is rejected.
+Use an explicit identifier to limit unattended work to one ready show.
 
 Notes begin with artist, date, venue and city, followed by recording notes and
 a `Name <email>` credit. Source and lineage suggestions remain editable; see

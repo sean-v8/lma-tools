@@ -301,7 +301,7 @@ def parse_review(text):
     return identifier, metadata
 
 
-def edit_review(identifier, metadata, *, history=True):
+def edit_review(identifier, metadata, *, history=True, yes=False):
     from .history import suggest
     from .metadata_review import comparison, snapshot
     from .ui import edit_document
@@ -318,7 +318,11 @@ def edit_review(identifier, metadata, *, history=True):
         + comparison(remote, metadata)
         + review_text(identifier, metadata)
     )
-    result = edit_document(document, parse_review)
+    result = (
+        parse_review(document)
+        if yes
+        else edit_document(document, parse_review)
+    )
     if result[0] != identifier:
         remote = snapshot(result[0])
     print(comparison(remote, result[1]), end="")
@@ -934,6 +938,11 @@ def parser():
         help="review obsolete remote originals; no preparation or upload",
     )
     p.add_argument(
+        "--yes",
+        action="store_true",
+        help="accept valid defaults without prompts; no cleanup deletions",
+    )
+    p.add_argument(
         "--no-clean",
         action="store_true",
         help="omit remote cleanup review during a normal upload",
@@ -1064,7 +1073,11 @@ def run_upload(args, directory, project, config):
                 print("  " + error)
             if args.preview or args.dry_run:
                 raise ValueError("Stale manifests; preview made no changes")
-            if input("Type REBUILD to regenerate FFP/MD5 only: ") != "REBUILD":
+            if (
+                not args.yes
+                and input("Type REBUILD to regenerate FFP/MD5 only: ")
+                != "REBUILD"
+            ):
                 raise ValueError("Manifest repair cancelled")
             validate_manifests(directory, repair=True)
             notes, small, flacs = discover(directory, notes)
@@ -1105,6 +1118,8 @@ def run_upload(args, directory, project, config):
             or get_preference(config, abbreviation).get("collection")
             or (previous or {}).get("collection")
         )
+        if not collection and args.yes and not (args.preview or args.dry_run):
+            raise ValueError("Set a collection in config or with --collection")
         if not collection and not (args.preview or args.dry_run):
             collection = input(
                 f"Collection identifier for {abbreviation}: "
@@ -1126,6 +1141,7 @@ def run_upload(args, directory, project, config):
                 identifier,
                 metadata,
                 history=not bool(saved.get("creator")),
+                yes=args.yes,
             )
             metadata["runtime"] = runtime
             journal = Journal(
@@ -1203,6 +1219,7 @@ def run_upload(args, directory, project, config):
                 force=args.force,
                 replacements_only=args.clean,
                 session=session,
+                unattended=args.yes,
             )
         if not approved:
             transfer_summary(item, files, args.force)
@@ -1226,7 +1243,7 @@ def run_upload(args, directory, project, config):
                     print(f"    {name}")
             print("Dry run only: no local or Archive.org changes made.")
             return 0
-        if not approved:
+        if not approved and not args.yes:
             if (
                 input(
                     "Type UPLOAD to proceed (anything else cancels): "
@@ -1464,6 +1481,8 @@ def run_upload(args, directory, project, config):
 def main(argv=None, *, enqueue=None, approved=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     args = parser().parse_args(argv)
+    if args.yes and args.clean:
+        raise ValueError("--clean requires interactive deletion review")
     args.enqueue = enqueue
     args.approved = approved
     if args.approved_plan:
@@ -1553,6 +1572,7 @@ def main(argv=None, *, enqueue=None, approved=None):
                 preview=args.preview,
                 notes=args.notes,
                 workers=config.get("prepare_workers"),
+                yes=args.yes,
                 journal=Journal(
                     project / f"{args.identifier or directory.name}_lma.log",
                     args.identifier or directory.name,

@@ -123,6 +123,23 @@ def review_outputs(argv, args, config, outputs, directory):
         pending = []
         arguments = [*argv, str(output.resolve())]
         try:
+            if not (args.preview or args.dry_run or args.yes):
+                while True:
+                    choice = (
+                        input("Process [p], skip [s, Enter], quit batch [q]: ")
+                        .strip()
+                        .lower()
+                        or "s"
+                    )
+                    if choice in {"p", "process", "s", "skip", "q", "quit"}:
+                        break
+                    print("Choose p, s or q.")
+                if choice in {"s", "skip"}:
+                    print("Skipped; no show files changed.")
+                    continue
+                if choice in {"q", "quit"}:
+                    print("Batch review stopped; approved uploads continue.")
+                    return result
             code = cli.main(
                 arguments, enqueue=pending.append if asynchronous else None
             )
@@ -141,7 +158,7 @@ def review_outputs(argv, args, config, outputs, directory):
                 except BaseException:
                     plan.unlink(missing_ok=True)
                     raise
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, EOFError):
             print("\nBatch review stopped; approved uploads continue.")
             return 130
         except (ValueError, OSError, RequestException) as error:

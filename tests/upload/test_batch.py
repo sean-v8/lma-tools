@@ -124,6 +124,7 @@ class BatchTests(unittest.TestCase):
                     "lma_tools.upload.prepare.prepare_show", return_value={}
                 ) as prepare,
                 redirect_stdout(io.StringIO()),
+                patch("builtins.input", return_value="p"),
             ):
                 self.assertEqual(cli.main(["-p", "--config", str(config)]), 0)
             self.assertEqual(
@@ -167,15 +168,93 @@ class BatchTests(unittest.TestCase):
                 patch.object(batch.shutil, "which", return_value="/tmux"),
                 redirect_stdout(io.StringIO()),
             ):
-                self.assertEqual(
-                    batch.run_batch([], args, {"shows_root": root}), 0
-                )
+                with patch("builtins.input", return_value="p"):
+                    result = batch.run_batch([], args, {"shows_root": root})
+                self.assertEqual(result, 0)
             self.assertEqual(events, ["review", "start", "review", "start"])
             plans = list((root / "state").glob("batch-*/approved-*.json"))
             self.assertEqual(len(plans), 2)
             self.assertTrue(
                 all(json.loads(p.read_text())["argv"] for p in plans)
             )
+
+    def test_batch_skip_precedes_preparation_and_leaves_files_untouched(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = make_show(root)
+            second = make_show(root, "other", "other2026-08-18")
+            config = root / "config.toml"
+            config.write_text(f'[upload]\nshows_root = "{root}"\n')
+            before = {
+                p: p.read_bytes() for p in first.rglob("*") if p.is_file()
+            }
+            with (
+                patch("builtins.input", side_effect=["", "invalid", "p"]),
+                patch(
+                    "lma_tools.upload.prepare.prepare_show", return_value={}
+                ) as prepare,
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(cli.main(["-p", "--config", str(config)]), 0)
+            prepare.assert_called_once()
+            self.assertEqual(prepare.call_args.args[0], second)
+            after = {
+                p: p.read_bytes() for p in first.rglob("*") if p.is_file()
+            }
+            self.assertEqual(before, after)
+
+    def test_quit_preserves_previously_launched_uploads(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            outputs = [
+                (root, root / "first2026-08-17"),
+                (root, root / "second2026-08-18"),
+            ]
+            args = cli.parser().parse_args([])
+            args.config = root / "config.toml"
+
+            def review(argv, **kwargs):
+                kwargs["enqueue"]({"identifier": Path(argv[-1]).name})
+                return 0
+
+            with (
+                patch("builtins.input", side_effect=["p", "q"]),
+                patch.object(cli, "main", side_effect=review) as run,
+                patch.object(launcher, "start_window") as start,
+                redirect_stdout(io.StringIO()),
+            ):
+                result = batch.review_outputs([], args, {}, outputs, root)
+            self.assertEqual(result, 0)
+            run.assert_called_once()
+            start.assert_called_once()
+            self.assertEqual(len(list(root.glob("approved-*.json"))), 1)
+
+    def test_preview_and_dry_run_remain_prompt_free(self):
+        for option in ("--preview", "--dry-run"):
+            with (
+                self.subTest(option=option),
+                patch("builtins.input", side_effect=AssertionError("prompt")),
+                patch.object(cli, "main", return_value=0) as run,
+                redirect_stdout(io.StringIO()),
+            ):
+                args = cli.parser().parse_args([option])
+                batch.review_outputs(
+                    [option], args, {}, [(Path("/root"), Path("/show"))], None
+                )
+                run.assert_called_once()
+
+    def test_eof_stops_before_processing_a_show(self):
+        with (
+            patch("builtins.input", side_effect=EOFError),
+            patch.object(cli, "main") as run,
+            redirect_stdout(io.StringIO()),
+        ):
+            args = cli.parser().parse_args([])
+            result = batch.review_outputs(
+                [], args, {}, [(Path("/root"), Path("/show"))], None
+            )
+        self.assertEqual(result, 130)
+        run.assert_not_called()
 
     def test_slots_bound_concurrent_transfers_and_cancel_waiters(self):
         with tempfile.TemporaryDirectory() as temporary:
