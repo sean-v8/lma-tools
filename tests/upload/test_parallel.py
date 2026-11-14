@@ -252,7 +252,7 @@ class TransferTests(unittest.TestCase):
         for name, _, headers in self.calls:
             self.assertEqual(
                 headers["x-archive-queue-derive"],
-                "1" if name.endswith(".flac") else "0",
+                "0",
             )
         self.assertEqual(len(set(self.sessions)), 5)
         self.assertCountEqual(self.closed, self.sessions)

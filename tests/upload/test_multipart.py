@@ -186,7 +186,7 @@ class MultipartTests(unittest.TestCase):
                 response.headers["ETag"] = '"' + "a" * 32 + '"'
             return response
         self.assertEqual(request.method, "POST")
-        self.assertEqual(request.headers["x-archive-queue-derive"], "1")
+        self.assertEqual(request.headers["x-archive-queue-derive"], "0")
         self.assertFalse(
             any(key.startswith("x-archive-meta") for key in request.headers)
         )

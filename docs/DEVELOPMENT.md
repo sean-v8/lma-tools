@@ -79,11 +79,12 @@ Ordinary PUT recovery checks uncertain acknowledgements before resending.
 Confirmed absence permits a fresh PUT; unknown state triggers further checks
 instead of a blind retransmission. Incomplete ordinary PUTs restart in full.
 
-Without selected cleanup, each FLAC PUT requests derivation; small-file PUTs
-suppress it. Multipart completion requests derivation for its assembled FLAC. A
-final item derive request follows successful processing of all selected files,
-including skips. Direct Tasks API submissions use `derive.php`; `derive` is not
-a supported command name. The per-file upload header is a separate mechanism.
+Every file PUT and multipart request, including completion, suppresses
+server-side derivation. One final item derive request follows checksum
+verification of all selected files, including skips and multipart assemblies,
+and a successful post-upload audit. Direct Tasks API submissions use
+`derive.php`; `derive` is not a supported command name. The per-file upload
+header is a separate mechanism.
 Metadata-only and runtime-only modes do not queue file derivation. Task
 acceptance does not establish that Archive has finished processing it. Upload-
 only mode selects TXT, JPG, FFP, MD5 and FLAC files. It skips metadata review,
@@ -94,10 +95,10 @@ The exact `derive.php already queued/running` application error is accepted as
 an existing pending task. Other errors remain failures and are recorded with
 their message. A failure after all selected files verify has dashboard status
 `derive failed`; its verified bytes and file counts remain in TOTAL. These
-requests are item-wide, even when triggered by one file's completion. Selected
-cleanup defers per-file derives until corrected uploads verify and approved
-originals are deleted without cascade. Bounded metadata/HEAD polling confirms
-absence before final derive. Pending deletion exits while retaining
+requests are item-wide. Selected cleanup must finish after corrected uploads
+verify, with approved originals deleted without cascade. Bounded metadata/HEAD
+polling confirms absence before final derive. Pending deletion exits while
+retaining
 `delete_accepted`; rerun cleanup later. Acceptance is not finality. Known local
 multipart checkpoints block deletion and conflicting payloads. An interrupted
 replacement can resume its own matching payload checkpoint. Assembly started on

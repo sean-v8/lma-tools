@@ -185,7 +185,12 @@ class WorkflowTests(unittest.TestCase):
                 item,
                 Mock(exists=True, metadata={"mediatype": "collection"}),
             ]
-            session.submit_task.return_value = response()
+
+            def derive_after_uploads(*args, **kwargs):
+                self.assertEqual(item.upload_file.call_count, 3)
+                return response()
+
+            session.submit_task.side_effect = derive_after_uploads
             with (
                 patch.object(lma, "audio_runtime", return_value="2:05:50"),
                 patch.object(
@@ -204,7 +209,8 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(calls[0].kwargs["metadata"]["runtime"], "2:05:50")
             self.assertNotIn("setlist", calls[0].kwargs["metadata"])
             self.assertEqual(
-                [c.kwargs["queue_derive"] for c in calls], [False, False, True]
+                [c.kwargs["queue_derive"] for c in calls],
+                [False, False, False],
             )
             session.submit_task.assert_called_once()
 
@@ -266,9 +272,7 @@ class UpdatedWorkflowTests(unittest.TestCase):
                 patch.object(
                     cli,
                     "upload_files",
-                    side_effect=lambda *a, **kw: order.append(
-                        ("upload", kw["defer_derive"])
-                    ),
+                    side_effect=lambda *a, **kw: order.append(("upload",)),
                 ),
                 patch(
                     "lma_tools.upload.recovery.remote_state",
@@ -288,7 +292,7 @@ class UpdatedWorkflowTests(unittest.TestCase):
                 ),
             ):
                 cli.main(args)
-            self.assertEqual(order[0], ("upload", True))
+            self.assertEqual(order[0], ("upload",))
             self.assertEqual(order[-2:], [("delete",), ("derive",)])
             self.assertTrue(all(e[0] == "verify" for e in order[1:-2]))
 

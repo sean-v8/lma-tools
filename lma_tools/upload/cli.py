@@ -582,7 +582,6 @@ def upload_files(
     tracker=None,
     multipart=None,
     replacements=None,
-    defer_derive=False,
 ):
     options = multipart if multipart is not None else MultipartOptions()
     policy = recovery if recovery is not None else RecoveryPolicy()
@@ -688,9 +687,7 @@ def upload_files(
                     metadata=transport_metadata(metadata),
                     checksum=False,
                     verify=True,
-                    queue_derive=(
-                        not defer_derive and path.suffix.lower() == ".flac"
-                    ),
+                    queue_derive=False,
                     retries=retries,
                     retries_sleep=retry_sleep,
                     headers={"x-archive-size-hint": str(total_size)},
@@ -718,7 +715,6 @@ def upload_files(
                     policy,
                     progress,
                     cancel,
-                    queue_derive=not defer_derive,
                 )
                 outcome = upload.run(defer_assembly=True)
                 if outcome is None:
@@ -1391,7 +1387,6 @@ def run_upload(args, directory, project, config):
                     tracker=tracker,
                     multipart=config["multipart_options"],
                     replacements=replacements,
-                    defer_derive=bool(deletions),
                     workers=upload_workers(
                         args.workers
                         if args.workers is not None

@@ -200,10 +200,10 @@ Corrected uploads must be remotely checksum-verified before approved extras are
 deleted. Deletes do not cascade. Accepted deletion is not finalized; bounded
 metadata/HEAD checks must confirm absence before final derivation. If still
 pending, the run retains the accepted-deletion log and exits; rerun cleanup
-later. When cleanup is selected, per-file derivation waits until cleanup
-finishes; a final derive request follows. Otherwise each new FLAC requests
-derivation, followed by a final request. Small-file PUTs do not request
-derivation. Archive controls task timing; upload completion does not mean
+later. All file uploads and multipart completion requests suppress derivation.
+One final derive request follows checksum verification of every selected file,
+the post-upload audit, and any approved cleanup. Archive controls task timing;
+upload completion does not mean
 derivation is done. See [Preparation](docs/PREPARATION.md) for cleanup
 safeguards and edge cases.
 
