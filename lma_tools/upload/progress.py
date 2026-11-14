@@ -408,6 +408,9 @@ class ProgressRow:
         self.path = path
         self.order = order
         self.started = False
+        self.wire = 0
+        self.transfer_started = None
+        self.last_transfer = None
         self.bar = None
         if board.enabled:
             self.bar = OrderedProgress(
@@ -451,14 +454,30 @@ class ProgressRow:
                 text = {"verifying remote checksum": "verifying"}.get(
                     text, text
                 )
+                if text in {"completing", "assembling"}:
+                    elapsed = (
+                        self.last_transfer - self.transfer_started
+                        if self.last_transfer is not None
+                        else 0
+                    )
+                    self.bar._display_rate = self.wire / max(elapsed, 0.001)
                 self.bar.set_postfix_str(text, refresh=False)
                 self.board._redraw()
+
+    def _start_transfer(self):
+        if self.transfer_started is None:
+            self.transfer_started = monotonic()
+        if self.bar is not None:
+            for attribute in ("_display_rate", "_display_elapsed"):
+                if hasattr(self.bar, attribute):
+                    delattr(self.bar, attribute)
 
     def begin(self):
         if self.board.tracker is not None:
             self.board.tracker.begin(self.path.name)
         with self.board.lock:
             self.board._record(self.path.name, "begin")
+            self._start_transfer()
             if self.bar is not None:
                 self.bar._resume_offset = 0
                 self.bar.reset()
@@ -470,6 +489,8 @@ class ProgressRow:
             self.board.tracker.resume(self.path.name, offset)
         with self.board.lock:
             self.board._record(self.path.name, "resume", offset)
+            if self.bar is None or offset < self.bar.total:
+                self._start_transfer()
             if self.bar is not None:
                 self.bar.reset()
                 self.bar.n = self.bar.initial = self.bar.last_print_n = offset
@@ -481,6 +502,11 @@ class ProgressRow:
             self.board.tracker.advance(self.path.name, size)
         with self.board.lock:
             self.board._record(self.path.name, "advance", size)
+            if size > 0:
+                if self.transfer_started is None:
+                    self._start_transfer()
+                self.wire += size
+                self.last_transfer = monotonic()
             if self.bar is not None:
                 refreshed = self.bar.update(size)
                 if self.bar.n >= self.bar.total:

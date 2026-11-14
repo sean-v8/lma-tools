@@ -150,6 +150,50 @@ class ShowTotalTests(unittest.TestCase):
         self.addCleanup(board.close)
         return board
 
+    def test_assembly_retains_average_across_part_resets_and_waits(self):
+        board = self.board()
+        row = board.row(self.files[0], 1)
+        with patch(
+            "lma_tools.upload.progress.monotonic", return_value=10
+        ) as clock:
+            row.resume(0)
+            clock.return_value = 12
+            row.advance(40)
+            clock.return_value = 13
+            row.resume(40)
+            clock.return_value = 20
+            row.advance(60)
+            clock.return_value = 25
+            row.resume(100)
+            row.status("completing")
+            self.assertEqual(row.bar.format_dict["rate"], 10)
+            clock.return_value = 300
+            row.finish("assembling")
+            self.assertEqual(row.bar.format_dict["rate"], 10)
+            self.assertEqual(board.row(self.files[0], 1), row)
+            row.status("assembling")
+            board.complete(self.files[0].name)
+            self.assertEqual(row.bar.format_dict["rate"], 10)
+
+    def test_assembly_average_excludes_restored_bytes(self):
+        for offset in (80, 100):
+            with self.subTest(offset=offset):
+                board = self.board()
+                row = board.row(self.files[0], 1)
+                with patch(
+                    "lma_tools.upload.progress.monotonic", return_value=10
+                ) as clock:
+                    row.resume(offset)
+                    clock.return_value = 20
+                    if offset < 100:
+                        row.advance(100 - offset)
+                    row.resume(100)
+                    clock.return_value = 300
+                    row.status("assembling")
+                    self.assertEqual(
+                        row.bar.format_dict["rate"], (100 - offset) / 10
+                    )
+
     def test_retries_reset_only_unconfirmed_progress(self):
         board = self.board()
         first = board.row(self.files[0], 0)
