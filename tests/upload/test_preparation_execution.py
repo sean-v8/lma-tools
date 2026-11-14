@@ -95,7 +95,7 @@ class PreparationWorkerTests(unittest.TestCase):
 
 
 class PreparationProgressTests(unittest.TestCase):
-    def test_real_percentages_and_verified_total_use_reusable_rows(self):
+    def test_completed_preparation_rows_remain_visible(self):
         with patch.dict("os.environ", TERM="xterm"):
             board = PreparationProgress(
                 [{"destination": "one.flac"}, {"destination": "two.flac"}],
@@ -112,12 +112,24 @@ class PreparationProgressTests(unittest.TestCase):
                 self.assertEqual(board.total.n, 100)
                 update(100, "Verified")
                 self.assertEqual(board.total.n, 100)
-            self.assertEqual(board.slots, [2])
+            first = board.bars["one.flac"]
+            self.assertFalse(first.disable)
+            self.assertEqual(first.n, 100)
+            self.assertEqual(first.postfix, "Verified")
+            self.assertEqual(abs(first.pos), 2)
             with board.track(2, "two.flac") as update:
                 update(100, "Verified")
             self.assertEqual(board.total.n, 200)
+            self.assertFalse(first.disable)
+            self.assertEqual(first.postfix, "Verified")
+            self.assertEqual(abs(board.bars["two.flac"].pos), 3)
         finally:
             board.close()
+        output = board.stream.getvalue()
+        self.assertIn("Verified", output)
+        board.close()
+        self.assertEqual(board.stream.getvalue(), output)
+        self.assertTrue(all(bar.disable for bar in board.bars.values()))
 
     def test_non_terminal_never_emits_control_sequences(self):
         stream = io.StringIO()

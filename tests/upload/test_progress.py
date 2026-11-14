@@ -235,6 +235,55 @@ class ShowTotalTests(unittest.TestCase):
                         row.bar.format_dict["rate"], (100 - offset) / 10
                     )
 
+    def test_total_uses_live_samples_then_freezes_final_average(self):
+        board = self.board()
+        row = board.row(self.files[0], 0)
+        with patch(
+            "lma_tools.upload.progress.monotonic", return_value=10
+        ) as clock:
+            row.begin()
+            clock.return_value = 12
+            row.advance(20)
+            self.assertEqual(board._rate(), 10)
+            clock.return_value = 14
+            row.advance(60)
+            self.assertGreater(board._rate(), 10)
+            self.assertNotEqual(board._rate(), 20)
+            board.complete("b")
+            clock.return_value = 20
+            row.advance(20)
+            self.assertEqual(board._rate(), 10)
+            row.status("assembling")
+            clock.return_value = 200
+            self.assertEqual(board._rate(), 10)
+            board.complete("a")
+            self.assertEqual(board._rate(), 10)
+
+    def test_upload_redraw_never_adds_scrollback_lines(self):
+        stream = TtyBuffer()
+        board = self.board(stream=stream)
+        board.stop.set()
+        board.thread.join()
+        bars = [board.total, *(row.bar for row in board.rows)]
+        for width in (180, 95, 160, 95):
+            for bar in bars:
+                bar.dynamic_ncols = None
+                bar.ncols = width
+            stream.seek(0)
+            stream.truncate()
+            board._redraw()
+            self.assertNotIn("\n", stream.getvalue())
+            self.assertNotIn("\x1b[2J", stream.getvalue())
+            self.assertEqual(stream.getvalue().count("TOTAL"), 1)
+
+    def test_refresh_thread_redraws_while_transport_is_idle(self):
+        board = self.board()
+        refreshed = Event()
+        with patch.object(board, "_redraw", side_effect=refreshed.set):
+            self.assertTrue(refreshed.wait(2))
+        board.close()
+        self.assertFalse(board.thread.is_alive())
+
     def test_retries_reset_only_unconfirmed_progress(self):
         board = self.board()
         first = board.row(self.files[0], 0)
@@ -265,14 +314,17 @@ class ShowTotalTests(unittest.TestCase):
         board = self.board()
         row = board.row(self.files[0], 0)
         board.started = 10
-        with patch("lma_tools.upload.progress.monotonic", return_value=20):
+        with patch(
+            "lma_tools.upload.progress.monotonic", return_value=20
+        ) as clock:
             row.resume(80)
             board.complete("b")
             self.assertEqual(board.total.n, 180)
             self.assertEqual(board.total.format_dict["rate"], 0)
             row.advance(10)
             self.assertEqual(board.total.n, 190)
-            self.assertEqual(board.total.format_dict["rate"], 1)
+            clock.return_value = 21
+            self.assertEqual(board.total.format_dict["rate"], 10)
             row.resume(90)
             self.assertEqual(board.wire, 10)
             row.begin()

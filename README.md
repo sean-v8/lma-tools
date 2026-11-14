@@ -418,7 +418,8 @@ starting these views. Closing Overview does not stop uploads; a later run
 recreates it. Each show has a compact aggregate byte/rate bar and a count of
 completed FLACs.
 Elapsed time covers the current run. Remaining transfer time uses a smoothed
-rate over roughly 30 seconds, excluding previously uploaded bytes from speed.
+rate over roughly three seconds, excluding previously uploaded bytes.
+After all bytes are sent, rates retain the final transfer average.
 It estimates transfer time only; server acknowledgement and derivation can take
 longer. Normal transfers omit a status label; other states stay visible. Labels
 align to the longest visible identifier, and every row shares the same bar and

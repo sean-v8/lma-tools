@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from tqdm import tqdm
 
-from .progress import OrderedProgress, SharedColumns
+from .progress import OrderedProgress, SharedColumns, TransferRate
 from .tasks import TaskMonitor
 
 LIVE = {"checking", "uploading", "deriving"}
@@ -47,7 +47,7 @@ class DashboardJobs:
             self.samples[key] = job["heartbeat"], rate
             job["rate"] = (
                 job["rate"]
-                if job.get("transfer_finished")
+                if job.get("transfer_finished") or job.get("rate_sampled")
                 else rate
                 if job["status"] in LIVE
                 else 0
@@ -74,6 +74,11 @@ def total_progress(jobs):
         for key in ("total", "sent", "confirmed", "completed", "files")
     }
     running = sum(job["status"] in LIVE for job in included)
+    transferring = any(
+        job["status"] in {"checking", "uploading"}
+        and not job.get("transfer_finished")
+        for job in included
+    )
     total.update(
         started="total",
         identifier="TOTAL",
@@ -81,7 +86,12 @@ def total_progress(jobs):
         rate=sum(
             job["rate"]
             for job in included
-            if job["status"] in LIVE or job.get("transfer_finished")
+            if (
+                job["status"] in {"checking", "uploading"}
+                and not job.get("transfer_finished")
+                if transferring
+                else job["status"] in LIVE or job.get("transfer_finished")
+            )
         ),
         status=f"{running} running"
         if running
@@ -137,6 +147,7 @@ class ShowProgress:
         self.active = {}
         self.partial = {}
         self.wire = 0
+        self.rate = TransferRate()
         self.transfer_started = None
         self.last_transfer = None
         self.lock = RLock()
@@ -162,8 +173,7 @@ class ShowProgress:
     def publish(self):
         with self.lock:
             now = time.monotonic()
-            before, wire = self.previous
-            rate = (self.wire - wire) / max(now - before, 0.001)
+            rate = self.rate.sample(self.wire, now)
             if self.data["status"] not in (
                 "checking",
                 "uploading",
@@ -187,6 +197,7 @@ class ShowProgress:
                 rate = self.wire / max(duration, 0.001)
             self.data.update(
                 transfer_finished=finished,
+                rate_sampled=True,
                 heartbeat=time.time(),
                 confirmed=confirmed,
                 sent=confirmed + sent,
@@ -206,11 +217,16 @@ class ShowProgress:
                 except OSError:
                     pass
 
+    def current_rate(self):
+        with self.lock:
+            return self.rate.sample(self.wire, time.monotonic())
+
     def begin(self, name):
         with self.lock:
             self.active[name] = 0
             if self.transfer_started is None:
                 self.transfer_started = time.monotonic()
+                self.rate.sample(self.wire, self.transfer_started)
             self.data["status"] = "uploading"
 
     def advance(self, name, size):
@@ -227,6 +243,7 @@ class ShowProgress:
             self.active[name] = offset
             if offset < self.sizes[name] and self.transfer_started is None:
                 self.transfer_started = time.monotonic()
+                self.rate.sample(self.wire, self.transfer_started)
             self.partial[name] = offset
             self.data["status"] = "uploading"
 

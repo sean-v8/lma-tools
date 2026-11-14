@@ -1,6 +1,5 @@
 """Simple ordered percentage bars for local track preparation."""
 
-import heapq
 import os
 import sys
 from contextlib import contextmanager
@@ -10,7 +9,7 @@ from tqdm.utils import disp_trim
 
 
 class PreparationProgress:
-    """Reuse one row per active worker, with a show-wide percentage total."""
+    """Retain one row per track, with a show-wide percentage total."""
 
     def __init__(self, tracks, workers, stream=None):
         self.stream = stream if stream is not None else sys.stderr
@@ -19,7 +18,8 @@ class PreparationProgress:
         )
         self.count = len(tracks)
         self.lock = tqdm.get_lock()
-        self.slots = list(range(2, min(workers, self.count) + 2))
+        self.bars = {}
+        self.closed = False
         self.values = {track["destination"]: 0 for track in tracks}
         self.verified = set()
         self.total = self._bar("TOTAL", 0, self.count * 100)
@@ -34,6 +34,12 @@ class PreparationProgress:
             bar_format="{desc}",
         )
         self.separator.delay = 0
+        width = len(str(self.count))
+        for index, track in enumerate(tracks, 1):
+            name = track["destination"]
+            label = f"[{index:>{width}}/{self.count}] Preparing {name}"
+            self.bars[name] = self._bar(label, index + 1)
+            self.bars[name].set_postfix_str("waiting", refresh=False)
         self._separator()
 
     def _separator(self):
@@ -57,10 +63,7 @@ class PreparationProgress:
     @contextmanager
     def track(self, index, name):
         with self.lock:
-            slot = heapq.heappop(self.slots)
-            width = len(str(self.count))
-            label = f"[{index:>{width}}/{self.count}] Preparing {name}"
-            bar = self._bar(label, slot)
+            bar = self.bars[name]
         try:
 
             def update(percent, phase="Converting"):
@@ -82,10 +85,23 @@ class PreparationProgress:
             yield update
         finally:
             with self.lock:
-                bar.close()
-                heapq.heappush(self.slots, slot)
+                if self.enabled:
+                    bar.refresh()
 
     def close(self):
         with self.lock:
+            if self.closed:
+                return
+            self.closed = True
+            lines = (
+                [str(self.total), self.separator.desc]
+                + [str(bar) for bar in self.bars.values()]
+                if self.enabled
+                else []
+            )
+            for bar in self.bars.values():
+                bar.close()
             self.separator.close()
             self.total.close()
+            if lines:
+                print("\n".join(lines), file=self.stream, flush=True)

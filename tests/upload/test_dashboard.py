@@ -239,6 +239,41 @@ class DashboardTests(unittest.TestCase):
             finally:
                 tracker.close("verified")
 
+    def test_overview_and_upload_use_the_same_live_rate_sample(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            file = root / "one.flac"
+            file.write_bytes(b"x" * 100)
+            tracker = dashboard.ShowProgress(
+                "artist2026-08-17", [file], "show", root / "state"
+            )
+            tracker.stop.set()
+            tracker.thread.join()
+            try:
+                tracker.rate.previous = 10, 0
+                with patch.object(
+                    dashboard.time, "monotonic", return_value=12
+                ):
+                    tracker.advance(file.name, 20)
+                    tracker.publish()
+                    sample = tracker.current_rate()
+                jobs = dashboard.DashboardJobs(opened=0).update([tracker.data])
+                self.assertEqual(sample, 10)
+                self.assertEqual(jobs[0]["rate"], sample)
+                finished = dict(
+                    tracker.data,
+                    started=1,
+                    status="deriving",
+                    transfer_finished=True,
+                    rate=999,
+                )
+                self.assertEqual(
+                    dashboard.total_progress([*jobs, finished])["rate"],
+                    sample,
+                )
+            finally:
+                tracker.close("cancelled")
+
     def test_resumed_parts_credit_bytes_without_counting_wire_or_whole_files(
         self,
     ):

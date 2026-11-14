@@ -1,8 +1,10 @@
 """Coordinate upload bars without patching the Archive library globally."""
 
+import math
 import os
 import sys
 from contextlib import contextmanager
+from threading import Event, Thread
 from time import monotonic
 from urllib.parse import urlsplit
 
@@ -28,8 +30,43 @@ def upload_size(value):
         value /= 1024
 
 
+class TransferRate:
+    """Sample current wire traffic, independent of restored progress."""
+
+    def __init__(self):
+        self.previous = None
+        self.value = 0
+        self.sampled = False
+
+    def sample(self, wire, now):
+        if self.previous is None or now < self.previous[0]:
+            self.previous = now, wire
+            return self.value
+        before, count = self.previous
+        elapsed = now - before
+        if elapsed >= 0.5:
+            current = max(0, wire - count) / elapsed
+            weight = -math.expm1(-elapsed / 3)
+            self.value = (
+                self.value + weight * (current - self.value)
+                if self.sampled
+                else current
+            )
+            self.sampled = True
+            self.previous = now, wire
+        return self.value
+
+
 class UploadProgress(tqdm):
     """Display actual byte counts and non-inverted IEC transfer rates."""
+
+    def moveto(self, n):
+        if getattr(self, "_in_place", False):
+            if n:
+                self.fp.write(f"\x1b[{abs(n)}{'B' if n > 0 else 'A'}")
+                self.fp.flush()
+            return
+        super().moveto(n)
 
     @property
     def format_dict(self):
@@ -197,7 +234,7 @@ class SharedColumns:
                     # The separator is also part of the owned upload grid.
                     separator = 1 + max(0, self.terminal_width - 2) // columns
                     rows = sum(heights) + separator
-                    erase = "\x1b[2K" + "\n\x1b[2K" * (rows - 1)
+                    erase = "\x1b[2K" + "\x1b[B\x1b[2K" * (rows - 1)
                     back = f"\x1b[{rows - 1}A" if rows > 1 else ""
                     bars[0].fp.write("\r" + up + erase + back + "\r")
                 else:
@@ -258,6 +295,11 @@ class ProgressBoard:
         self.confirmed = set()
         self.wire = 0
         self.started = monotonic()
+        self.transfer_started = None
+        self.last_transfer = None
+        self.rate = TransferRate()
+        self.stop = Event()
+        self.thread = None
         self.closed = False
         self.total = None
         self.separator = None
@@ -290,20 +332,62 @@ class ProgressBoard:
                     ProgressRow(self, path, index)
                     for index, path in enumerate(files, 1)
                 ]
+                # Reserve rows once; later redraws only move the cursor.
+                height = len(self.rows) + 2
+                self.stream.write("\n" * (height - 1))
+                self.stream.write(f"\x1b[{height - 1}A\r")
+                for bar in [self.total, self.separator]:
+                    bar._in_place = True
+                for row in self.rows:
+                    row.bar._in_place = True
+                self._redraw()
+            self.thread = Thread(target=self._watch, daemon=True)
+            self.thread.start()
+
+    def _watch(self):
+        while not self.stop.wait(0.5):
+            with self.lock:
+                if self.closed:
+                    return
                 self._redraw()
 
     def _rate(self):
-        return self.wire / max(monotonic() - self.started, 0.001)
+        finished = self.sizes is not None and (
+            sum(self.sizes[n] for n in self.confirmed)
+            + sum(self.active.values())
+            >= sum(self.sizes.values())
+        )
+        if finished:
+            elapsed = (
+                self.last_transfer - self.transfer_started
+                if self.last_transfer is not None
+                else 0
+            )
+            return self.wire / max(elapsed, 0.001)
+        if self.tracker is not None and hasattr(
+            type(self.tracker), "current_rate"
+        ):
+            return self.tracker.current_rate()
+        return self.rate.sample(self.wire, monotonic())
 
     def _record(self, name, event, value=0):
         if self.sizes is None or name not in self.sizes or self.closed:
             return
+        now = monotonic()
+        if self.transfer_started is None and event in {"begin", "resume"}:
+            if event == "begin" or value < self.sizes[name]:
+                self.transfer_started = now
+                self.rate.sample(self.wire, now)
         if event == "complete":
             self.confirmed.add(name)
             self.active.pop(name, None)
         elif name not in self.confirmed:
             if event == "advance":
                 self.wire += max(0, value)
+                if value > 0:
+                    self.last_transfer = now
+                    if self.transfer_started is None:
+                        self.transfer_started = now
                 value = self.active.get(name, 0) + max(0, value)
             self.active[name] = min(self.sizes[name], max(0, value))
         if self.total is not None:
@@ -329,6 +413,9 @@ class ProgressBoard:
 
     def close(self):
         """Close live bars and retain one final file inventory on terminals."""
+        self.stop.set()
+        if self.thread is not None:
+            self.thread.join(timeout=1)
         with self.lock:
             if self.closed:
                 return

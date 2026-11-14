@@ -171,9 +171,12 @@ strings are right-aligned across TOTAL and show rows so status text lines up.
 Partial
 multipart bytes do not count as completed FLACs. Rates count current transport
 reads, excluding hashing and bytes restored from checkpoints. Interrupted runs
-retain confirmed files and checkpointed part bytes. The view smooths heartbeat
-rates with a 30-second exponential time constant. Repeated reads of one
-snapshot do not apply smoothing again. Timing starts at the current upload
+retain confirmed files and checkpointed part bytes. Upload and Overview share
+wire-rate samples with a three-second exponential time constant. Snapshot reads
+do not smooth those samples again. Once all bytes are sent, both views freeze
+the actual wire bytes divided by first-send to last-send time. Restored bytes
+and subsequent assembly or derive waits do not enter that final average.
+Timing starts at the current upload
 process, not the first historical log entry; finished and stale rows freeze at
 their final heartbeat. Remaining time covers bytes only, excluding
 unpredictable server acknowledgement and derive scheduling.
