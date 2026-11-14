@@ -38,6 +38,48 @@ class PrepareTests(unittest.TestCase):
             audio.writeframes(b"\x01\x02\x03" * 8000)
         self.config = {"genre": "Jazz", "creator": "Artist"}
 
+    def test_encore_starts_next_set_and_resets_local_numbering(self):
+        notes = self.show / "notes.txt"
+        header = "Artist\nNovember 06, 2026\nVenue\nCity\n\n"
+        encore = self.show / "Encore Song.wav"
+        shutil.copyfile(self.source, encore)
+        for heading in ("Encore", "ENCORE:", "Encore (partial)"):
+            for section, number in (("", 2), ("Set 1", 2), ("Set 2", 3)):
+                with self.subTest(heading=heading, section=section):
+                    notes.write_text(
+                        header + f"{section}\n01. Song\n\n"
+                        f"{heading}\n01. Encore Song\n"
+                    )
+                    plan = validate_plan(
+                        review_text(build_plan(self.show, self.config)),
+                        self.show,
+                    )
+                    self.assertEqual(plan["disc_total"], number)
+                    self.assertEqual(
+                        [row["disc"] for row in plan["tracks"]],
+                        [number - 1, number],
+                    )
+                    self.assertEqual(
+                        plan["tracks"][1]["destination"],
+                        f"test2026-11-06s{number}t01.flac",
+                    )
+                    self.assertEqual(plan["tracks"][1]["source"], encore.name)
+
+    @unittest.skipUnless(shutil.which("flac"), "reference flac required")
+    def test_encore_disc_tags_use_shared_total(self):
+        notes = self.show / "notes.txt"
+        notes.write_text(
+            notes.read_text().replace(
+                "1. Song", "Set 1\n01. Song\nEncore\n01. Encore Song"
+            )
+        )
+        shutil.copyfile(self.source, self.show / "Encore Song.wav")
+        apply_plan(self.show, build_plan(self.show, self.config))
+        for disc in (1, 2):
+            audio = FLAC(self.show / f"test2026-11-06s{disc}t01.flac")
+            self.assertEqual(audio["discnumber"], [f"{disc}/2"])
+            self.assertNotIn("totaldiscs", audio)
+
     def test_preview_prints_without_editor_or_writes(self):
         before = self.source.stat().st_mtime_ns
         with patch("lma_tools.upload.prepare.ui.edit_document") as edit:

@@ -146,6 +146,16 @@ def build_plan(directory, config_entry, notes=None):
             explicit_sets = True
             disc, local = int(section[1]), 0
             continue
+        if re.fullmatch(
+            r"\s*Encore\s*(?:\([^()\r\n]*\))?\s*:?\s*",
+            line,
+            re.I,
+        ):
+            explicit_sets = True
+            if rows:
+                disc += 1
+            local = 0
+            continue
         match = re.match(r"^\s*\d+\s*[.)-]\s*(\S.*)$", line)
         if match:
             local += 1
