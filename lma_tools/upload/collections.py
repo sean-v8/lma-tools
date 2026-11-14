@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 import tomlkit
+from tomlkit.items import Table, Whitespace
 
 from lma_tools.config import SECTION_NAMES
 
@@ -75,6 +76,16 @@ def sort_prefixes(values):
             del values[name]
         for name, value in entries:
             values[name] = value
+    for _, value in entries:
+        if not isinstance(value, Table):
+            continue
+        # Parsed trailing whitespace and generated indents otherwise stack.
+        body = value.value.body
+        while body and isinstance(body[-1][1], Whitespace):
+            body.pop()
+        if body and not value.as_string().endswith("\n"):
+            body[-1][1].trivia.trail += "\n"
+        value.trivia.indent = "\n" + value.trivia.indent.lstrip("\r\n")
 
 
 def save_collection(path, abbreviation, collection, creator=None, genre=None):

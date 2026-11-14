@@ -158,3 +158,29 @@ class PreferenceTests(unittest.TestCase):
             before = path.read_bytes()
             save_collection(path, "middle", "Middle", creator="Artist")
             self.assertEqual(path.read_bytes(), before)
+
+    def test_insert_repairs_spacing_without_changing_multiline_values(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.toml"
+            original = (
+                '[upload]\nshows_root="/shows"\n\n'
+                "[upload.prefix.alpha] # artist note\n"
+                'collection="Alpha" # keep value comment\n'
+                'creator="""First\n\n\nLast"""\n\n\n'
+                '[upload.prefix.zulu]\ncollection="Zulu"'
+            )
+            path.write_text(original)
+            path.chmod(0o600)
+            save_collection(path, "middle", "Middle", creator="Artist")
+            text = path.read_text()
+            self.assertIn('Last"""\n\n[upload.prefix.middle]', text)
+            self.assertIn('creator = "Artist"\n\n[upload.prefix.zulu]', text)
+            self.assertIn("# artist note", text)
+            self.assertIn("# keep value comment", text)
+            self.assertEqual(
+                tomllib.loads(text)["upload"]["prefix"]["alpha"]["creator"],
+                "First\n\n\nLast",
+            )
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            save_collection(path, "middle", "Middle", creator="Artist")
+            self.assertEqual(path.read_text(), text)
