@@ -175,6 +175,8 @@ class SharedColumns:
             return
         self.bars = bars
         snapshots = [progress_values(bar) for bar in bars]
+        # Size metrics from the current frame, not historical ETA extremes.
+        self.widths = {}
         for values in snapshots:
             for key, value in self.metrics(values).items():
                 self.widths[key] = max(self.widths.get(key, 0), len(value))
@@ -186,9 +188,18 @@ class SharedColumns:
                 wrapped = max(0, width - 1) // max(1, columns)
                 up = f"\x1b[{wrapped}A" if wrapped else ""
                 if self.bounded_clear:
-                    erase = "\x1b[2K"
-                    erase += "\n\x1b[2K" * wrapped
-                    bars[0].fp.write("\r" + up + erase + up + "\r")
+                    heights = [
+                        1
+                        + max(0, getattr(bar, "_rendered_width", 0) - 1)
+                        // max(1, columns)
+                        for bar in bars
+                    ]
+                    # The separator is also part of the owned upload grid.
+                    separator = 1 + max(0, self.terminal_width - 2) // columns
+                    rows = sum(heights) + separator
+                    erase = "\x1b[2K" + "\n\x1b[2K" * (rows - 1)
+                    back = f"\x1b[{rows - 1}A" if rows > 1 else ""
+                    bars[0].fp.write("\r" + up + erase + back + "\r")
                 else:
                     bars[0].fp.write("\r" + up + "\x1b[J")
             for bar in bars:

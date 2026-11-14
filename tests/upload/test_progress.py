@@ -80,6 +80,47 @@ class ColumnTests(unittest.TestCase):
                     for row in rows:
                         row.close()
 
+    def test_historical_eta_padding_shrinks_in_both_progress_views(self):
+        for statuses in (
+            ("assembling", "complete"),
+            ("2/4 completed, 1 running", "2/4 completed"),
+        ):
+            with self.subTest(statuses=statuses):
+                bars = []
+                columns = SharedColumns()
+                try:
+                    for status in statuses:
+                        bar = OrderedProgress(
+                            total=882 * 1024**2,
+                            desc="artist2026-11-14.long-name",
+                            ncols=180,
+                            file=TtyBuffer(),
+                            delay=1,
+                        )
+                        bar.n = 1
+                        bar._ema_dn = lambda: 1e-20
+                        bar._ema_dt = lambda: 1
+                        bar.set_postfix_str(status, refresh=False)
+                        bars.append(bar)
+                    columns.prepare(bars)
+                    old_width = columns.widths["remaining"]
+                    self.assertGreater(old_width, 5)
+                    for bar in bars:
+                        bar.n = bar.total
+                        bar._ema_dn = lambda: 100
+                    for width in (95, 180, 95):
+                        for bar in bars:
+                            bar.ncols = width
+                        columns.prepare(bars)
+                        self.assertEqual(columns.widths["remaining"], 5)
+                        lines = self.assert_aligned(bars, width)
+                        self.assertTrue(
+                            all("<00:00," in line for line in lines)
+                        )
+                finally:
+                    for bar in bars:
+                        bar.close()
+
     def test_resume_counts_checkpointed_bytes_without_an_inflated_rate(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "one.flac"
@@ -260,6 +301,27 @@ class ShowTotalTests(unittest.TestCase):
         self.assertIn("Keep this status", board.stream.getvalue())
         self.assertNotIn("\x1b[J", board.stream.getvalue())
         self.assertNotIn("\x1b[2J", board.stream.getvalue())
+
+    def test_resize_clears_every_reflowed_upload_row(self):
+        board = self.board()
+        bars = [board.total, *(row.bar for row in board.rows)]
+        for bar in bars:
+            bar.dynamic_ncols = None
+            bar.ncols = 180
+        board._redraw()
+        for bar in bars:
+            bar._rendered_width = 179
+            bar.ncols = 95
+        stream = board.stream
+        stream.seek(0)
+        stream.truncate()
+        board._redraw()
+        # Three bars plus separator each reflow to two physical rows.
+        self.assertEqual(stream.getvalue().count("\x1b[2K"), 8)
+        self.assertNotIn("\x1b[2J", stream.getvalue())
+        self.assertNotIn("\x1b[J", stream.getvalue())
+        for bar in bars:
+            self.assertLess(len(str(bar)), 95)
 
     def test_disabled_output_stays_plain_and_accounts_locally(self):
         for stream in (io.StringIO(), TtyBuffer()):
