@@ -344,6 +344,10 @@ class ProgressBoard:
             self.thread = Thread(target=self._watch, daemon=True)
             self.thread.start()
 
+        if self.enabled:
+            self.stream.write("\x1b[?25l")
+            self.stream.flush()
+
     def _watch(self):
         while not self.stop.wait(0.5):
             with self.lock:
@@ -419,21 +423,26 @@ class ProgressBoard:
         with self.lock:
             if self.closed:
                 return
-            lines = []
-            if self.persistent:
-                self._redraw()
-                lines = [str(self.total), self.separator.desc]
-                lines.extend(str(row.bar) for row in self.rows)
-            self.closed = True
-            for row in list(self.rows):
-                self.remove(row)
-            if self.separator is not None:
-                self.separator.close()
-            if self.total is not None:
-                self.total.close()
-            self.columns.bars = []
-            if lines:
-                print("\n".join(lines), file=self.stream, flush=True)
+            try:
+                lines = []
+                if self.persistent:
+                    self._redraw()
+                    lines = [str(self.total), self.separator.desc]
+                    lines.extend(str(row.bar) for row in self.rows)
+                self.closed = True
+                for row in list(self.rows):
+                    self.remove(row)
+                if self.separator is not None:
+                    self.separator.close()
+                if self.total is not None:
+                    self.total.close()
+                self.columns.bars = []
+                if lines:
+                    print("\n".join(lines), file=self.stream, flush=True)
+            finally:
+                if self.enabled:
+                    self.stream.write("\x1b[?25h")
+                    self.stream.flush()
 
     def message(self, text, **kwargs):
         with self.lock:
@@ -608,7 +617,7 @@ class ProgressRow:
             if self.bar is not None:
                 refreshed = self.bar.update(size)
                 if self.bar.n >= self.bar.total:
-                    self.bar.set_postfix_str("awaiting ack", refresh=False)
+                    self.bar.set_postfix_str("ack", refresh=False)
                     refreshed = True
                 if refreshed or self.board.total is not None:
                     self.board._redraw()

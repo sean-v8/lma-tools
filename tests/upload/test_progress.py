@@ -68,7 +68,7 @@ class ColumnTests(unittest.TestCase):
                     bars = [row.bar for row in rows]
                     lines = self.assert_aligned(bars, 160)
                     self.assertIn("short.flac ", lines[0])
-                    rows[1].status("awaiting ack")
+                    rows[1].status("ack")
                     self.assert_aligned(bars, 160)
                     for bar in bars:
                         bar.ncols = 80
@@ -234,6 +234,23 @@ class ShowTotalTests(unittest.TestCase):
                     self.assertEqual(
                         row.bar.format_dict["rate"], (100 - offset) / 10
                     )
+
+    def test_cursor_is_hidden_until_board_closes(self):
+        board = self.board()
+        stream = board.stream
+        self.assertTrue(stream.getvalue().endswith("\x1b[?25l"))
+        board.close()
+        self.assertTrue(stream.getvalue().endswith("\x1b[?25h"))
+        output = stream.getvalue()
+        board.close()
+        self.assertEqual(stream.getvalue(), output)
+
+    def test_cursor_is_restored_if_final_redraw_fails(self):
+        board = self.board()
+        with patch.object(board, "_redraw", side_effect=OSError("terminal")):
+            with self.assertRaises(OSError):
+                board.close()
+        self.assertTrue(board.stream.getvalue().endswith("\x1b[?25h"))
 
     def test_total_uses_live_samples_then_freezes_final_average(self):
         board = self.board()
@@ -468,7 +485,9 @@ class ShowTotalTests(unittest.TestCase):
         self.assertEqual(board.rows[1].bar.postfix, "skipped")
         self.assertEqual([abs(r.bar.pos) for r in board.rows], [2, 3])
         board.close()
-        final = board.stream.getvalue().splitlines()[-4:]
+        final = (
+            board.stream.getvalue().replace("\x1b[?25h", "").splitlines()[-4:]
+        )
         self.assertIn("TOTAL", final[0])
         self.assertIn("complete", final[-2])
         self.assertIn("skipped", final[-1])
@@ -617,7 +636,7 @@ class ProgressTests(unittest.TestCase):
                     self.assertIn(
                         "B/s", rows[0].bar.format_dict["upload_rate"]
                     )
-                    self.assertIn("awaiting ack", rows[0].bar.postfix)
+                    self.assertIn("ack", rows[0].bar.postfix)
                     rows[0].begin()
                     self.assertEqual(rows[0].bar.n, 0)
                 finally:
@@ -661,7 +680,7 @@ class ProgressTests(unittest.TestCase):
                 try:
                     row.bar.dynamic_ncols = None
                     row.bar.ncols = 80
-                    for state in ("checking", "", "verifying", "awaiting ack"):
+                    for state in ("checking", "", "verifying", "ack"):
                         row.status(state)
                         text = str(row.bar)
                         self.assertLessEqual(len(text), 80)

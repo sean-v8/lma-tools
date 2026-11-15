@@ -72,7 +72,7 @@ class PartReader:
         self.offset, self.size = offset, size
         self.progress, self.cancel = progress, cancel
         self.on_sent = None
-        self.ack_status = "awaiting ack"
+        self.ack_status = "ack"
         self.sent = False
         self.seek(0)
 
@@ -473,7 +473,7 @@ class MultipartUpload:
                     body = PartReader(
                         self.path, offset, size, self.progress, self.cancel
                     )
-                    body.ack_status = f"awaiting ack {number}/{count}"
+                    body.ack_status = f"ack {number}/{count}"
                     body.on_sent = lambda: self.journal.append(
                         "resume_part_sent",
                         name=self.path.name,

@@ -306,7 +306,7 @@ class TransferTests(unittest.TestCase):
                     self.assertEqual(tracker.wire, tracker.data["total"])
                     self.assertEqual(tracker.data["completed"], len(files))
                     self.assertIn("B/s", stream.getvalue())
-                    self.assertIn("awaiting ack", stream.getvalue())
+                    self.assertIn("ack", stream.getvalue())
                     self.assertNotIn("send", self.parent.__dict__)
                 finally:
                     tracker.close("done")

@@ -38,7 +38,7 @@ class MultipartTests(unittest.TestCase):
                 body.read(3)
                 progress.status.assert_not_called()
                 body.read(2)
-                progress.status.assert_called_once_with("awaiting ack")
+                progress.status.assert_called_once_with("ack")
                 body.read(2)
                 sent.assert_called_once_with()
                 body.restart()
