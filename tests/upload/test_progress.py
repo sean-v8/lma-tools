@@ -371,6 +371,46 @@ class ShowTotalTests(unittest.TestCase):
         self.assertNotIn("\x1b[J", board.stream.getvalue())
         self.assertNotIn("\x1b[2J", board.stream.getvalue())
 
+    def test_reflow_taller_than_screen_restores_the_actual_anchor(self):
+        board = self.board()
+        bars = [board.total, *(row.bar for row in board.rows)]
+        for bar in bars:
+            bar.dynamic_ncols = None
+            bar.ncols = 180
+        board._redraw()
+        for bar in bars:
+            bar._rendered_width = 179
+            bar.ncols = 95
+        stream = board.stream
+        stream.seek(0)
+        stream.truncate()
+        board.columns.prepare(bars)
+        # Model a four-row viewport: the eight reflowed rows cannot fit.
+        row, saved = 2, None
+        controls = re.findall(r"\x1b(?:[78]|\[[0-9]*[AB])", stream.getvalue())
+        for control in controls:
+            if control == "\x1b7":
+                saved = row
+            elif control == "\x1b8":
+                row = saved
+            else:
+                count = int(control[2:-1] or "1")
+                row = max(
+                    0,
+                    min(3, row + count * (1 if control.endswith("B") else -1)),
+                )
+        self.assertEqual(row, 1)
+        self.assertNotIn("\n", stream.getvalue())
+
+    def test_file_row_restores_anchor_when_downward_movement_clips(self):
+        board = self.board()
+        stream = board.stream
+        stream.seek(0)
+        stream.truncate()
+        board.rows[0].bar.moveto(60)
+        board.rows[0].bar.moveto(-60)
+        self.assertEqual(stream.getvalue(), "\x1b7\x1b[60B\x1b8")
+
     def test_resize_clears_every_reflowed_upload_row(self):
         board = self.board()
         bars = [board.total, *(row.bar for row in board.rows)]

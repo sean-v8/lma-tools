@@ -63,7 +63,7 @@ class UploadProgress(tqdm):
     def moveto(self, n):
         if getattr(self, "_in_place", False):
             if n:
-                self.fp.write(f"\x1b[{abs(n)}{'B' if n > 0 else 'A'}")
+                self.fp.write(f"\x1b7\x1b[{n}B" if n > 0 else "\x1b8")
                 self.fp.flush()
             return
         super().moveto(n)
@@ -235,8 +235,9 @@ class SharedColumns:
                     separator = 1 + max(0, self.terminal_width - 2) // columns
                     rows = sum(heights) + separator
                     erase = "\x1b[2K" + "\x1b[B\x1b[2K" * (rows - 1)
-                    back = f"\x1b[{rows - 1}A" if rows > 1 else ""
-                    bars[0].fp.write("\r" + up + erase + back + "\r")
+                    # Downward movement can clamp at the screen bottom.
+                    # Restore the actual anchor, not the requested distance.
+                    bars[0].fp.write("\r" + up + "\x1b7" + erase + "\x1b8\r")
                 else:
                     bars[0].fp.write("\r" + up + "\x1b[J")
             for bar in bars:
