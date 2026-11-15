@@ -3,7 +3,7 @@
 import html
 import time
 
-from .recovery import remote_state
+from .recovery import RemoteConflict, remote_state
 
 
 def inventory(files):
@@ -73,9 +73,13 @@ def audit_upload(session, identifier, files, metadata, attempts=3):
             if not equivalent(key, value, remote.get(key)):
                 errors.append(f"metadata: {key}")
         for name, local in expected.items():
-            state, _ = remote_state(
-                session, identifier, name, local["md5"], local["size"]
-            )
+            try:
+                state, _ = remote_state(
+                    session, identifier, name, local["md5"], local["size"]
+                )
+            except RemoteConflict:
+                # Accepted replacements may still expose the old checksum.
+                state = "different"
             if state != "match":
                 errors.append(f"file: {name} ({state})")
         if not errors:

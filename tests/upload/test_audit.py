@@ -86,6 +86,50 @@ class AuditTests(unittest.TestCase):
         for name in ("upload", "skip", "replace", "check"):
             self.assertEqual(groups[name], [name + ".flac"])
 
+    def test_audit_retries_stale_replacement_checksums(self):
+        expected = audit.inventory([self.path])[self.path.name]
+        for source in ("metadata", "HEAD"):
+            with self.subTest(source=source):
+                entry = {"name": self.path.name, "md5": "0" * 32, "size": 5}
+                data = {"metadata": {}, "files": [entry]}
+                self.session.get_metadata.return_value = data
+                head = Mock(status_code=200)
+                head.headers = {
+                    "ETag": '"' + "0" * 32 + '"',
+                    "Content-Length": "5",
+                }
+                self.session.head.return_value = head
+                if source == "HEAD":
+                    data["files"] = []
+
+                def become_visible(_):
+                    data["files"] = [{"name": self.path.name, **expected}]
+
+                with patch.object(audit.time, "sleep") as sleep:
+                    sleep.side_effect = become_visible
+                    result = audit.audit_upload(
+                        self.session, ID, [self.path], {}
+                    )
+                self.assertEqual(result, {"files": 1, "fields": 0})
+                sleep.assert_called_once_with(2)
+                self.session.send.assert_not_called()
+
+    def test_persistent_checksum_mismatch_remains_an_audit_failure(self):
+        self.session.get_metadata.return_value = {
+            "metadata": {},
+            "files": [{"name": self.path.name, "md5": "0" * 32, "size": 5}],
+        }
+        with patch.object(audit.time, "sleep") as sleep:
+            with self.assertRaisesRegex(
+                ValueError, "Post-upload audit not verified:.*different"
+            ) as error:
+                audit.audit_upload(self.session, ID, [self.path], {})
+        self.assertNotIn("--force", str(error.exception))
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(self.session.get_metadata.call_count, 6)
+        self.session.send.assert_not_called()
+        self.session.submit_task.assert_not_called()
+
     def test_task_states_are_read_only(self):
         for summary, expected in (
             ({"queued": 1}, "deriving"),
