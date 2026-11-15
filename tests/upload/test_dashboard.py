@@ -18,6 +18,38 @@ from lma_tools.upload.progress import (
 
 
 class DashboardTests(unittest.TestCase):
+    def test_latest_run_supersedes_item_and_corrects_totals(self):
+        history = dashboard.DashboardJobs(opened=100)
+        old = self.job(1, "deriving")
+        old.update(sent=100, confirmed=100, completed=5)
+        other = self.job(2, "deriving")
+        history.update([old, other], now=100)
+        new = dict(self.job(3), identifier=old["identifier"])
+        for incoming in ([new, old], [old, new], [old], []):
+            rows = history.update(incoming, now=100)
+            self.assertEqual([row["started"] for row in rows], [2, 3])
+            total = dashboard.total_progress(rows)
+            self.assertEqual(total["total"], 200)
+            self.assertEqual(total["files"], 10)
+            self.assertEqual(total["status"], "2 running")
+            self.assertNotIn(1, history.samples)
+        new.update(status="verified", heartbeat=101)
+        rows = history.update([old, new], now=101)
+        self.assertEqual(rows[-1]["status"], "verified")
+        self.assertEqual(old["status"], "deriving")
+
+    def test_newest_run_wins_regardless_of_initial_snapshot_order(self):
+        for reverse in (False, True):
+            history = dashboard.DashboardJobs(opened=100)
+            old = self.job(1, "deriving")
+            new = dict(self.job(2), identifier=old["identifier"])
+            incoming = [old, new]
+            if reverse:
+                incoming.reverse()
+            rows = history.update(incoming, now=100)
+            self.assertEqual([row["started"] for row in rows], [2])
+            self.assertEqual(set(history.samples), {2})
+
     def test_derive_failure_keeps_completed_upload_in_total(self):
         job = self.job(1, "derive failed")
         job.update(sent=100, confirmed=100, completed=5, rate=0)

@@ -26,6 +26,7 @@ class DashboardJobs:
         self.opened = time.time() if opened is None else opened
         self.jobs = {}
         self.samples = {}
+        self.latest = {}
 
     def update(self, jobs, now=None):
         now = time.time() if now is None else now
@@ -37,6 +38,14 @@ class DashboardJobs:
                 and job["heartbeat"] < self.opened
             ):
                 continue
+            identifier = job["identifier"]
+            if key < self.latest.get(identifier, key):
+                continue
+            self.latest[identifier] = key
+            for previous, retained in list(self.jobs.items()):
+                if retained["identifier"] == identifier and previous != key:
+                    del self.jobs[previous]
+                    self.samples.pop(previous, None)
             job = dict(job)
             heartbeat, rate = self.samples.get(
                 key, (job["heartbeat"], job["rate"])
