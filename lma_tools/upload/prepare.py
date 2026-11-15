@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import tomllib
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -15,6 +16,7 @@ from pathlib import Path
 
 from mutagen import File
 from mutagen.flac import FLAC
+from tqdm import tqdm
 
 from . import ui
 from .core import SMALL, show_identity
@@ -519,6 +521,50 @@ def _md5(path):
         return hashlib.file_digest(stream, "md5").hexdigest()
 
 
+def _commit_progress(label, paths):
+    """Report actual bytes processed without extra file reads."""
+    print(label + "...", flush=True)
+    return tqdm(
+        total=sum(path.stat().st_size for path in paths),
+        desc=label,
+        unit="B",
+        unit_scale=True,
+        unit_divisor=1024,
+        dynamic_ncols=True,
+        disable=not sys.stderr.isatty() or os.environ.get("TERM") == "dumb",
+    )
+
+
+def _backup_and_check(directory, backup, touched, fingerprints):
+    """Keep rollback copies and recheck sources before changing originals."""
+    paths = [
+        directory / name
+        for name in sorted(touched)
+        if (directory / name).exists()
+    ]
+    existing = set()
+    with _commit_progress("Backing up files", paths) as progress:
+        for path in paths:
+            target = backup / path.name
+            with path.open("rb") as source, target.open("wb") as output:
+                while block := source.read(1024 * 1024):
+                    output.write(block)
+                    progress.update(len(block))
+            shutil.copystat(path, target)
+            existing.add(path.name)
+    paths = [directory / name for name in fingerprints]
+    with _commit_progress("Checking source checksums", paths) as progress:
+        for path in paths:
+            digest = hashlib.md5()
+            with path.open("rb") as source:
+                while block := source.read(1024 * 1024):
+                    digest.update(block)
+                    progress.update(len(block))
+            if digest.hexdigest() != fingerprints[path.name]:
+                raise ValueError("Source changed during preparation.")
+    return existing
+
+
 def _ffp(directory):
     return "".join(
         f"{p.name}:{FLAC(p).info.md5_signature:032x}\n"
@@ -784,19 +830,11 @@ def apply_plan(directory, plan, *, workers=None, journal=None, compression=5):
             if p.suffix.lower() in {".ffp", ".md5"}
             and p.name not in {ffp_name, md5_name}
         )
-        print("Committing prepared files...", flush=True)
         backup = Path(temporary) / "backup"
         backup.mkdir()
         touched = {p.name for p in changed} | removed
-        existing = set()
-        for name in touched:
-            path = directory / name
-            if path.exists():
-                shutil.copy2(path, backup / name)
-                existing.add(name)
-        for name, digest in fingerprints.items():
-            if _md5(directory / name) != digest:
-                raise ValueError("Source changed during preparation.")
+        existing = _backup_and_check(directory, backup, touched, fingerprints)
+        print("Committing prepared files...", flush=True)
         try:
             for path in changed:
                 path.replace(directory / path.name)
