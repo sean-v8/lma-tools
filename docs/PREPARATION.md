@@ -85,10 +85,12 @@ Install the OS dependencies separately from Python/uv, for example:
 sudo apt install flac ffmpeg
 ```
 
-WAV encoding uses reference `flac` with verification, constant and fixed
-subframes disabled, LPC order zero and mid-side disabled. This produces
-verbatim subframes; it is not compression level `-0`. Existing FLAC audio is
-copied for staging rather than re-encoded.
+WAV encoding uses reference `flac` with verification and compression level 5
+by default. Under `[upload]`, set `flac_compression` to an integer from 0 to
+8, or to `"uncompressed"` for verbatim subframes. Level 0 still compresses;
+uncompressed mode disables constant, fixed, LPC and mid-side encoding.
+Existing FLAC audio is copied for staging rather than re-encoded. Changing the
+setting affects WAV conversion only; all modes preserve the decoded audio.
 
 These managed fields use the approved preparation values:
 
@@ -205,9 +207,10 @@ Archive uploads, including assembly. Automated network tests use mocks; they do
 not independently establish live upload, deletion or derivation success. No
 live Archive operation was performed for this documentation.
 
-Real encoding was verified with reference FLAC 1.4.3 using a supplied 24-bit/48
-kHz WAV: all 740 subframes were VERBATIM, and decoded PCM matched. Generated
-fixtures also exercise conversion, no-op reruns, manifest repair and rollback.
+Real encoding tests exercise levels 0, 5 and 8 and uncompressed mode with
+24-bit/48 kHz WAV input and decoded-PCM verification. Uncompressed analysis
+checks for verbatim subframes. Generated fixtures also exercise conversion,
+no-op reruns, manifest repair and rollback.
 Encoder tests skip when the required command-line tools are absent; install
 them to include these checks.
 

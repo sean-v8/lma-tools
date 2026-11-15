@@ -1,8 +1,8 @@
 """Reference FLAC encoding and streaming decoded-PCM verification.
 
 Runtime dependencies: reference flac CLI, ffmpeg and ffprobe on PATH.
-No compression-level shortcut is used: all predictive and constant
-subframes are disabled explicitly. Callers own transactional staging.
+Compression defaults to level 5; uncompressed mode uses verbatim subframes.
+Callers own transactional staging.
 """
 
 from __future__ import annotations
@@ -61,7 +61,23 @@ def verify_pcm(source, destination):
         raise ValueError("Decoded PCM differs from source.")
 
 
-def encode_verbatim(source, destination, *, progress=None, verify=True):
+def compression_options(value):
+    """Validate the shared FLAC setting and return reference encoder flags."""
+    if type(value) is int and 0 <= value <= 8:
+        return [f"-{value}"]
+    if isinstance(value, str) and value == "uncompressed":
+        return [
+            "--disable-constant-subframes",
+            "--disable-fixed-subframes",
+            "-l0",
+            "--no-mid-side",
+        ]
+    raise ValueError('flac_compression must be 0-8 or "uncompressed"')
+
+
+def encode_flac(
+    source, destination, *, compression=5, progress=None, verify=True
+):
     """Encode with reference FLAC; never overwrite or delete the source."""
     source, destination = Path(source), Path(destination)
     if destination.exists():
@@ -71,10 +87,7 @@ def encode_verbatim(source, destination, *, progress=None, verify=True):
         "--silent",
         "--verify",
         "--no-padding",
-        "--disable-constant-subframes",
-        "--disable-fixed-subframes",
-        "-l0",
-        "--no-mid-side",
+        *compression_options(compression),
         "-o",
         str(destination),
         str(source),

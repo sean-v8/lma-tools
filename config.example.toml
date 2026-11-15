@@ -1,11 +1,13 @@
 [upload]
 shows_root = "/path/to/shows"
 log = true
-# Shared across uploads when reviewing a no-argument batch.
+# Maximum simultaneous file transfers per show, including in batch mode.
 upload_workers = 3
 # Preparation defaults to one worker per logical CPU, capped by track count.
 # Uncomment to limit simultaneous conversion/tagging jobs on this machine.
 # prepare_workers = 16
+# FLAC level 0-8; default 5. Use "uncompressed" for verbatim encoding.
+# flac_compression = 5
 
 [upload.resume]
 enabled = true

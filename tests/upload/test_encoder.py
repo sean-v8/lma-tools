@@ -12,11 +12,40 @@ from unittest.mock import Mock, patch
 
 from mutagen.flac import FLAC
 
-from lma_tools.upload.encoder import encode_verbatim, pcm_digest, verify_pcm
+from lma_tools.upload.encoder import (
+    compression_options,
+    encode_flac,
+    pcm_digest,
+    verify_pcm,
+)
 
 
 @unittest.skipUnless(shutil.which("flac"), "reference flac required")
 class EncoderTests(unittest.TestCase):
+    def test_compression_levels_preserve_pcm_and_reduce_repetitive_audio(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "audio.wav"
+            with wave.open(str(source), "wb") as audio:
+                audio.setparams((2, 3, 48000, 0, "NONE", "none"))
+                audio.writeframes(b"\x01\x02\x03\xfe\xff\x7f" * 9000)
+            plain = root / "plain.flac"
+            encode_flac(source, plain, compression="uncompressed")
+            for level in (0, 5, 8):
+                with self.subTest(level=level):
+                    target = root / f"level-{level}.flac"
+                    encode_flac(source, target, compression=level)
+                    self.assertLess(
+                        target.stat().st_size, plain.stat().st_size
+                    )
+                    self.assertEqual(FLAC(target).info.bits_per_sample, 24)
+                    verify_pcm(source, target)
+            default = root / "default.flac"
+            encode_flac(source, default)
+            self.assertEqual(
+                default.read_bytes(), (root / "level-5.flac").read_bytes()
+            )
+
     def test_rate_mismatch_is_not_equivalent_audio(self):
         with tempfile.TemporaryDirectory() as temporary:
             paths = [Path(temporary) / name for name in ("a.wav", "b.wav")]
@@ -34,7 +63,7 @@ class EncoderTests(unittest.TestCase):
             with wave.open(str(source), "wb") as audio:
                 audio.setparams((2, 3, 48000, 0, "NONE", "none"))
                 audio.writeframes(b"\x01\x02\x03\xfe\xff\x7f" * 9000)
-            encode_verbatim(source, target)
+            encode_flac(source, target, compression="uncompressed")
             self.assertTrue(source.exists())
             self.assertEqual(FLAC(target).info.bits_per_sample, 24)
             verify_pcm(source, target)
@@ -58,7 +87,42 @@ class EncoderTests(unittest.TestCase):
             self.assertGreater(len(rows), 2)
             self.assertTrue(all("type=VERBATIM" in row for row in rows))
             with self.assertRaises(FileExistsError):
-                encode_verbatim(source, target)
+                encode_flac(source, target)
+
+
+class CompressionSettingTests(unittest.TestCase):
+    def test_valid_levels_and_uncompressed_mode(self):
+        for level in range(9):
+            self.assertEqual(compression_options(level), [f"-{level}"])
+        self.assertIn(
+            "--disable-fixed-subframes", compression_options("uncompressed")
+        )
+
+    def test_upload_config_accepts_and_validates_compression(self):
+        from lma_tools.upload.cli import load_config
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config.toml"
+            for value in ("0", "5", "8", '"uncompressed"'):
+                config.write_text(
+                    f'[upload]\nshows_root = "{root}"\n'
+                    f"flac_compression = {value}\n"
+                )
+                self.assertIn("flac_compression", load_config(config))
+            for value in ("true", "9", '"fast"'):
+                config.write_text(
+                    f'[upload]\nshows_root = "{root}"\n'
+                    f"flac_compression = {value}\n"
+                )
+                with self.assertRaisesRegex(ValueError, "flac_compression"):
+                    load_config(config)
+
+    def test_invalid_settings_are_rejected(self):
+        for value in (-1, 9, True, False, 5.0, "5", "fast", None, []):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "flac_compression"):
+                    compression_options(value)
 
 
 class EncoderStdinTests(unittest.TestCase):

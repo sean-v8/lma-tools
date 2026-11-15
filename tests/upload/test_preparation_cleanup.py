@@ -60,7 +60,7 @@ class PreparationCleanupTests(unittest.TestCase):
                 if remove:
                     md5.unlink()
                 with (
-                    patch("lma_tools.upload.prepare.encode_verbatim") as enc,
+                    patch("lma_tools.upload.prepare.encode_flac") as enc,
                     patch("lma_tools.upload.prepare.verify_pcm") as verify,
                     patch("lma_tools.upload.prepare.tag_audio") as tag,
                 ):

@@ -21,7 +21,8 @@ from .core import SMALL, show_identity
 from .encoder import (
     LEGACY_TOTALS,
     MANAGED_TAGS,
-    encode_verbatim,
+    compression_options,
+    encode_flac,
     tag_audio,
     tags_match,
     verify_pcm,
@@ -659,9 +660,10 @@ def _prepare_tracks(tracks, workers, prepare, announce=None):
         pool.shutdown(wait=True, cancel_futures=True)
 
 
-def apply_plan(directory, plan, *, workers=None, journal=None):
+def apply_plan(directory, plan, *, workers=None, journal=None, compression=5):
     """Stage, verify and commit, rolling back failures before WAV removal."""
     directory = Path(directory).resolve()
+    compression_options(compression)
     workers = preparation_workers(workers)
     plan = validate_plan(review_text(plan), directory)
     artwork = directory / plan["artwork"] if plan["artwork"] else None
@@ -716,9 +718,10 @@ def apply_plan(directory, plan, *, workers=None, journal=None):
                 target = stage / name
                 try:
                     if source.suffix.lower() == ".wav":
-                        encode_verbatim(
+                        encode_flac(
                             source,
                             target,
+                            compression=compression,
                             progress=lambda percent: update(percent),
                             verify=False,
                         )
@@ -824,6 +827,7 @@ def prepare_show(
     *,
     notes=None,
     workers=None,
+    compression=5,
     journal=None,
     yes=False,
 ):
@@ -863,10 +867,15 @@ def prepare_show(
             "prepare_start",
             plan=approved,
             workers=min(preparation_workers(workers), len(approved["tracks"])),
+            flac_compression=compression,
         )
     try:
         result = apply_plan(
-            directory, approved, workers=workers, journal=journal
+            directory,
+            approved,
+            workers=workers,
+            journal=journal,
+            compression=compression,
         )
     except BaseException as error:
         if journal:

@@ -73,6 +73,8 @@ class PreparationProgress:
                     if phase == "Verified" and name not in self.verified:
                         self.verified.add(name)
                         self.total.update(100)
+                        if self.enabled:
+                            self.total.refresh()
                     if not self.enabled:
                         return
                     changed = bar.postfix != phase

@@ -102,6 +102,7 @@ def load_config(path):
         "recovery",
         "upload_workers",
         "prepare_workers",
+        "flac_compression",
         "resume",
     }
     if unknown:
@@ -120,9 +121,11 @@ def load_config(path):
     validate(config.get("prefix", {}))
     load_policy(config.get("recovery", {}))
     upload_workers(config.get("upload_workers", 3))
+    from .encoder import compression_options
     from .prepare import preparation_workers
 
     preparation_workers(config.get("prepare_workers"))
+    compression_options(config.get("flac_compression", 5))
     load_options(config.get("resume", {}))
     return config
 
@@ -1552,6 +1555,7 @@ def main(argv=None, *, enqueue=None, approved=None):
                 preview=args.preview,
                 notes=args.notes,
                 workers=config.get("prepare_workers"),
+                compression=config.get("flac_compression", 5),
                 yes=args.yes,
                 journal=Journal(
                     project / f"{args.identifier or directory.name}_lma.log",
@@ -1592,6 +1596,7 @@ def main(argv=None, *, enqueue=None, approved=None):
                 preview=True,
                 notes=args.notes,
                 workers=config.get("prepare_workers"),
+                compression=config.get("flac_compression", 5),
             )
             from .core import SMALL
 

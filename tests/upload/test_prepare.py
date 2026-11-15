@@ -517,10 +517,10 @@ class PrepareTests(unittest.TestCase):
         self.assertTrue(validate_manifests(self.show)["valid"])
 
     def _external_pair(self):
-        from lma_tools.upload.encoder import encode_verbatim
+        from lma_tools.upload.encoder import encode_flac
 
         flac = self.source.with_suffix(".flac")
-        encode_verbatim(self.source, flac)
+        encode_flac(self.source, flac)
         return flac
 
     @unittest.skipUnless(shutil.which("flac"), "reference flac required")
@@ -541,7 +541,7 @@ class PrepareTests(unittest.TestCase):
         with patch(
             "lma_tools.upload.prepare.verify_pcm", wraps=verify_pcm
         ) as verify:
-            with patch("lma_tools.upload.prepare.encode_verbatim") as enc:
+            with patch("lma_tools.upload.prepare.encode_flac") as enc:
                 apply_plan(self.show, plan)
         enc.assert_not_called()
         self.assertEqual(verify.call_count, 2)

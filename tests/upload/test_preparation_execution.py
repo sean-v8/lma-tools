@@ -131,6 +131,25 @@ class PreparationProgressTests(unittest.TestCase):
         self.assertEqual(board.stream.getvalue(), output)
         self.assertTrue(all(bar.disable for bar in board.bars.values()))
 
+    def test_total_refreshes_after_every_verified_track(self):
+        with patch.dict("os.environ", TERM="xterm"):
+            board = PreparationProgress(
+                [{"destination": f"{i}.flac"} for i in range(32)],
+                32,
+                stream=TtyBuffer(),
+            )
+        try:
+            board.total.mininterval = 3600
+            with patch.object(board.total, "refresh") as refresh:
+                for index in range(31):
+                    with board.track(index + 1, f"{index}.flac") as update:
+                        update(100, "Verified")
+                self.assertEqual(refresh.call_count, 31)
+            self.assertEqual(board.total.n, 3100)
+            self.assertIn("97%", str(board.total))
+        finally:
+            board.close()
+
     def test_non_terminal_never_emits_control_sequences(self):
         stream = io.StringIO()
         board = PreparationProgress(
