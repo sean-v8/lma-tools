@@ -190,6 +190,10 @@ class SharedColumns:
                 if values["n"] >= values["total"]
                 else "?"
             )
+            # Near-zero startup rates can imply absurdly large ETAs.
+            # Do not let those estimates consume the filename column.
+            if len(result["remaining"]) > 7:
+                result["remaining"] = ">999h"
         return result
 
     def tail(self, values):
@@ -212,12 +216,31 @@ class SharedColumns:
             return
         self.bars = bars
         snapshots = [progress_values(bar) for bar in bars]
-        # Size metrics from the current frame, not historical ETA extremes.
-        self.widths = {}
+        columns = min(values.get("ncols") or 80 for values in snapshots)
+        if self.terminal_width != columns:
+            self.widths = {}
+        # Reserve normal upload states and rates before the first transfer.
+        # Keep widths until resize; changing text must not shrink the grid.
+        minimums = (
+            {"speed": 12, "status": len("retrying part")}
+            if columns >= 95
+            else {}
+        )
+        if self.timing:
+            width = 7 if columns >= 120 else 5
+            minimums.update(elapsed=width, remaining=width)
         for values in snapshots:
             for key, value in self.metrics(values).items():
-                self.widths[key] = max(self.widths.get(key, 0), len(value))
-        columns = min(values.get("ncols") or 80 for values in snapshots)
+                self.widths[key] = max(
+                    self.widths.get(key, 0),
+                    minimums.get(key, 0),
+                    len(value),
+                )
+        size_width = max(
+            self.widths["uploaded"],
+            self.widths["expected"],
+        )
+        self.widths["uploaded"] = self.widths["expected"] = size_width
         if self.terminal_width not in (None, columns):
             # Erase only the progress region, including its reflowed rows.
             if bars[0].fp.isatty():

@@ -104,7 +104,7 @@ class ColumnTests(unittest.TestCase):
                         bars.append(bar)
                     columns.prepare(bars)
                     old_width = columns.widths["remaining"]
-                    self.assertGreater(old_width, 5)
+                    self.assertLessEqual(old_width, 7)
                     for bar in bars:
                         bar.n = bar.total
                         bar._ema_dn = lambda: 100
@@ -112,14 +112,56 @@ class ColumnTests(unittest.TestCase):
                         for bar in bars:
                             bar.ncols = width
                         columns.prepare(bars)
-                        self.assertEqual(columns.widths["remaining"], 5)
+                        self.assertEqual(
+                            columns.widths["remaining"],
+                            7 if width >= 120 else 5,
+                        )
                         lines = self.assert_aligned(bars, width)
                         self.assertTrue(
-                            all("<00:00," in line for line in lines)
+                            all(
+                                "<00:00," in line.replace(" ", "")
+                                for line in lines
+                            )
                         )
                 finally:
                     for bar in bars:
                         bar.close()
+
+    def test_normal_transfer_updates_keep_column_boundaries(self):
+        bar = OrderedProgress(
+            total=250 * 1024**2,
+            desc="artist2026-11-14.recording.flac",
+            ncols=140,
+            file=TtyBuffer(),
+            delay=1,
+        )
+        columns = SharedColumns()
+        try:
+            layouts = []
+            for rate, status in (
+                (None, "waiting"),
+                (32 * 1024, "part 1/16"),
+                (150 * 1024, "ack 1/16"),
+                (2 * 1024**2, "retrying part"),
+                (500 * 1024, "assembling"),
+                (100 * 1024, "complete"),
+            ):
+                bar.n = 16 * 1024**2 if rate else 0
+                bar._ema_dn = lambda rate=rate: rate
+                bar._ema_dt = lambda rate=rate: 1 if rate else 0
+                bar.set_postfix_str(status, refresh=False)
+                columns.prepare([bar])
+                layouts.append(
+                    (
+                        columns.label_width,
+                        columns.bar_width,
+                        dict(columns.widths),
+                    )
+                )
+                self.assertLess(len(str(bar)), 140)
+            self.assertTrue(all(row == layouts[0] for row in layouts))
+        finally:
+            bar.close()
 
     def test_resume_counts_checkpointed_bytes_without_an_inflated_rate(self):
         with tempfile.TemporaryDirectory() as tmp:
