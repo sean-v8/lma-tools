@@ -20,6 +20,8 @@ delay = 30.0
 max_delay = 300.0
 
 [report]
+# Clickable identifiers in terminals with hyperlink support.
+hyperlinks = true
 query = ['collection:(etree OR taperssection)']
 sort = "publicdate"
 reverse = false

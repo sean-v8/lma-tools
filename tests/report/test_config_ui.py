@@ -49,6 +49,14 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 self.config("view_batch_size = " + value)
 
+    def test_hyperlink_preference_and_validation(self):
+        self.assertTrue(self.config("").hyperlinks)
+        self.assertFalse(self.config("hyperlinks = false").hyperlinks)
+        self.assertTrue(self.config("hyperlinks = true").hyperlinks)
+        for value in ("1", '"false"', "[]"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.config("hyperlinks = " + value)
+
     def test_missing_explicit_file_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(FileNotFoundError):

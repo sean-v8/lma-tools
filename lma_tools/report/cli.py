@@ -65,7 +65,7 @@ def main(argv=None):
                 )
             )
         else:
-            print(render(rows, summary, sort))
+            print(render(rows, summary, sort, hyperlinks=config.hyperlinks))
         for warning in service.warnings:
             print(f"Warning: {warning}", file=sys.stderr)
         return 1 if service.warnings else 0

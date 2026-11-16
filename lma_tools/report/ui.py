@@ -91,7 +91,15 @@ def interactive(service, config, clauses, sort, reverse):
                         reuse_search=cache,
                     )
                 if rows or service.timing.enabled:
-                    print(render(rows, summary, sort, service.timing.render()))
+                    print(
+                        render(
+                            rows,
+                            summary,
+                            sort,
+                            service.timing.render(),
+                            hyperlinks=config.hyperlinks,
+                        )
+                    )
                 for warning in service.warnings:
                     print(f"Warning: {warning}")
                 show_menu = True

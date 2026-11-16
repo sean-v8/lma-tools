@@ -468,6 +468,10 @@ editing and favorites. Enter runs a report; `q` quits. `cache` toggles reuse of
 search results, `reload` refreshes caches, and `debug` toggles in-memory
 request timings. Successful view counts remain cached until reload or exit.
 
+Report identifiers are clickable in terminals with OSC 8 hyperlink support.
+Set `hyperlinks = false` under `[report]` in config.toml to disable links.
+Links default to enabled; redirected text and JSON remain plain.
+
 Views are lifetime counts, not unique listeners. Daily means lifetime views
 divided by days since publicdate, with a one-day minimum. Unknown counts remain
 unknown; totals use successful counts. Zero counts are excluded from averages

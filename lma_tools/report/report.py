@@ -1,8 +1,11 @@
 """Pure normalization, numeric sorting, and recording summaries."""
 
+import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import date
+from urllib.parse import quote
 
 from .fields import first, values
 
@@ -140,8 +143,12 @@ def summarize(rows, exclude_zero_views=True):
     }
 
 
-def render(rows, summary, sort, timing=""):
+def render(rows, summary, sort, timing="", *, hyperlinks=True, stream=None):
     """Render the original script's rows, summary labels, and spacing."""
+    output = sys.stdout if stream is None else stream
+    hyperlinks = (
+        hyperlinks and output.isatty() and os.environ.get("TERM") != "dumb"
+    )
     width = max((len(row.identifier) for row in rows), default=0)
     lines = []
     for row in rows:
@@ -151,7 +158,12 @@ def render(rows, summary, sort, timing=""):
             display = f"{row.daily:.2f}" if row.daily is not None else "?"
         else:
             display = str(row.views) if row.views is not None else "?"
-        lines.append(f"{row.identifier:<{width + 2}}{display:>4}")
+        identifier = row.identifier
+        if hyperlinks and identifier.isprintable():
+            url = "https://archive.org/details/" + quote(identifier, safe="")
+            identifier = f"\033]8;;{url}\033\\{identifier}\033]8;;\033\\"
+        padding = " " * (width + 2 - len(row.identifier))
+        lines.append(f"{identifier}{padding}{display:>4}")
     lines.extend(
         [
             "",

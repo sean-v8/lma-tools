@@ -1,6 +1,7 @@
 """Terminal screen restoration and final-output placement."""
 
 import io
+import re
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import Mock, patch
@@ -50,6 +51,7 @@ class TerminalTests(unittest.TestCase):
         output = stream.getvalue()
         temporary = output.split("\033[?1049h", 1)[1].split("\033[?1049l")[0]
         final = output.split("\033[?1049l", 1)[1]
+        final = re.sub(r"\x1b\]8;;[^\x1b]*\x1b\\", "", final)
         self.assertLess(temporary.index("a "), temporary.index("b "))
         self.assertLess(final.index("b "), final.index("a "))
         self.assertIn("Tapes", final)

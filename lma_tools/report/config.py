@@ -14,6 +14,7 @@ class Config:
     query: tuple[str, ...] = ("collection:(etree OR taperssection)",)
     sort: str = "publicdate"
     reverse: bool = False
+    hyperlinks: bool = True
     timeout: float = 30.0
     view_batch_size: int = 100
     exclude_zero_views: bool = True
@@ -37,7 +38,7 @@ def load_config(path=None):
     ):
         raise ValueError("query must be an array of nonempty strings")
     data["query"] = tuple(query)
-    for key in ("reverse", "exclude_zero_views"):
+    for key in ("reverse", "exclude_zero_views", "hyperlinks"):
         if key in data and not isinstance(data[key], bool):
             raise ValueError(f"{key} must be a boolean")
     timeout = data.get("timeout", Config.timeout)
