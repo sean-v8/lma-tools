@@ -13,6 +13,7 @@ import tomllib
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import date, datetime
 from pathlib import Path
+from time import time_ns
 
 from mutagen import File
 from mutagen.flac import FLAC
@@ -565,6 +566,19 @@ def _backup_and_check(directory, backup, touched, fingerprints):
     return existing
 
 
+def _order_track_times(stage, tracks):
+    """Give prepared audio distinct mtimes in disc/track order."""
+    ordered = sorted(
+        tracks,
+        key=lambda track: (_number(track["disc"]), _number(track["track"])),
+    )
+    finished = time_ns()
+    for index, track in enumerate(ordered):
+        path = stage / track["destination"]
+        modified = finished - (len(ordered) - index - 1) * 1_000_000_000
+        os.utime(path, ns=(path.stat().st_atime_ns, modified))
+
+
 def _ffp(directory):
     return "".join(
         f"{p.name}:{FLAC(p).info.md5_signature:032x}\n"
@@ -817,6 +831,15 @@ def apply_plan(directory, plan, *, workers=None, journal=None, compression=5):
             if not (directory / p.name).exists()
             or _md5(p) != _md5(directory / p.name)
         ]
+        audio_changed = any(p.suffix == ".flac" for p in changed)
+        if audio_changed:
+            # Include unchanged tracks so the whole set sorts consistently.
+            changed_names = {p.name for p in changed}
+            changed.extend(
+                stage / track["destination"]
+                for track in plan["tracks"]
+                if track["destination"] not in changed_names
+            )
         removed = {
             t["source"]
             for t in plan["tracks"]
@@ -836,6 +859,8 @@ def apply_plan(directory, plan, *, workers=None, journal=None, compression=5):
         existing = _backup_and_check(directory, backup, touched, fingerprints)
         print("Committing prepared files...", flush=True)
         try:
+            if audio_changed:
+                _order_track_times(stage, plan["tracks"])
             for path in changed:
                 path.replace(directory / path.name)
             for name in removed:
