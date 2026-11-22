@@ -60,5 +60,10 @@ def query_text(clauses):
 
 
 def quoted_clause(field, value):
+    if field == "uploader":
+        value = value.strip()
+        if value and "@" not in value.lstrip("@"):
+            field = "_uploader_useritem"
+            value = "@" + value.lstrip("@")
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'{field}:"{escaped}"'

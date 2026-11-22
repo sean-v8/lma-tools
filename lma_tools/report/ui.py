@@ -42,6 +42,8 @@ def print_query(clauses, sort, reverse, cache=False):
     print("sort:" + ("-" if reverse else "") + sort)
     print("cache:" + str(cache))
     for clause in clauses:
+        if clause.startswith("_uploader_useritem:"):
+            clause = "uploader:" + clause.removeprefix("_uploader_useritem:")
         print(clause)
 
 

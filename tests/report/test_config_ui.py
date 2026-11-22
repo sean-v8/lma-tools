@@ -67,6 +67,21 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(quoted_clause("venue", 'a"b'), 'venue:"a\\"b"')
         self.assertEqual(field_name("u"), "uploader")
 
+    def test_uploader_email_and_profile_queries(self):
+        for value, expected in (
+            ("demo@example.org", 'uploader:"demo@example.org"'),
+            ("demo_user", '_uploader_useritem:"@demo_user"'),
+            ("@demo_user", '_uploader_useritem:"@demo_user"'),
+            (" demo_user ", '_uploader_useritem:"@demo_user"'),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(quoted_clause("uploader", value), expected)
+                clauses = []
+                with patch("builtins.input", side_effect=["u", value, "q"]):
+                    with redirect_stdout(io.StringIO()):
+                        interactive(Mock(), Config(), clauses, "views", False)
+                self.assertEqual(clauses, [expected])
+
 
 class ServiceTests(unittest.TestCase):
     def setUp(self):

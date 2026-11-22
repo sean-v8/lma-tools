@@ -469,6 +469,11 @@ search results, `reload` refreshes caches, and `debug` toggles in-memory
 request timings. Successful view counts remain cached until reload or exit.
 
 Report identifiers are clickable in terminals with OSC 8 hyperlink support.
+The report's `u` tag accepts an uploader email address or an Archive profile
+username, with or without its leading `@`. Usernames search the account's
+uploads using `_uploader_useritem`; email addresses use `uploader` as before.
+Raw query clauses and configured queries are passed through unchanged.
+
 Set `hyperlinks = false` under `[report]` in config.toml to disable links.
 Links default to enabled; redirected text and JSON remain plain.
 
