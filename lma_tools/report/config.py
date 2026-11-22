@@ -2,11 +2,12 @@
 
 import math
 import os
+import re
 from dataclasses import dataclass
 
 from lma_tools.config import config_path, read_section
 
-from .fields import field_name
+from .fields import field_name, quoted_clause
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,12 @@ def load_config(path=None):
         isinstance(clause, str) and clause.strip() for clause in query
     ):
         raise ValueError("query must be an array of nonempty strings")
-    data["query"] = tuple(query)
+    data["query"] = tuple(
+        quoted_clause("uploader", match[1])
+        if (match := re.fullmatch(r'\s*uploader:\s*"([^"\\]+)"\s*', clause))
+        else clause
+        for clause in query
+    )
     for key in ("reverse", "exclude_zero_views", "hyperlinks"):
         if key in data and not isinstance(data[key], bool):
             raise ValueError(f"{key} must be a boolean")
