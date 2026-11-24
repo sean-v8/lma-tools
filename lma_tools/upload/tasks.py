@@ -15,6 +15,7 @@ class TaskMonitor:
         self.pending = set()
         self.states = {}
         self.checked = {}
+        self.finished = {}
         self.thread = Thread(target=self._run, daemon=True)
         self.thread.start()
 
@@ -28,6 +29,10 @@ class TaskMonitor:
                     self.pending.add(key)
                 if key in self.states:
                     job["status"] = self.states[key]
+                    if key in self.finished:
+                        job["heartbeat"] = max(
+                            job.get("heartbeat", 0), self.finished[key]
+                        )
                     if not job.get("transfer_finished"):
                         job["rate"] = 0
         return jobs
@@ -46,6 +51,11 @@ class TaskMonitor:
                     state = task_status(session, key[0])
                 with self.lock:
                     self.states[key] = state
+                    if state == "deriving":
+                        self.finished.pop(key, None)
+                    else:
+                        # Freeze at first detection, not each later poll.
+                        self.finished.setdefault(key, time.time())
             except Exception:
                 # Task visibility never invalidates a completed file audit.
                 continue
