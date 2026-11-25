@@ -671,7 +671,8 @@ class PrepareTests(unittest.TestCase):
             with patch("lma_tools.upload.prepare.tag_audio") as tag:
                 apply_plan(self.show, plan)
         tag.assert_not_called()
-        self.assertEqual(verify.call_count, 2)
+        self.assertEqual(verify.call_count, 1)
+        self.assertEqual(Path(verify.call_args.args[0]), redundant)
         self.assertFalse(redundant.exists())
         self.assertEqual(flac.stat().st_mtime_ns, stamp)
         self.assertTrue(validate_manifests(self.show)["valid"])

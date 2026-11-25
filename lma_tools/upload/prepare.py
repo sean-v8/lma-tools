@@ -777,6 +777,15 @@ def apply_plan(directory, plan, *, workers=None, journal=None, compression=5):
                 source = directory / track["source"]
                 target = stage / name
                 try:
+                    if track["source"] == name and tags_match(
+                        source, plan, track, total, discs, artwork
+                    ):
+                        # Read-only staging reference; never retag this path.
+                        target.symlink_to(source)
+                        update(100, "Verified")
+                        if journal:
+                            journal.append("prepare_track_reused", name=name)
+                        return
                     if source.suffix.lower() == ".wav":
                         encode_flac(
                             source,
@@ -828,18 +837,13 @@ def apply_plan(directory, plan, *, workers=None, journal=None, compression=5):
         changed = [
             p
             for p in stage.iterdir()
-            if not (directory / p.name).exists()
-            or _md5(p) != _md5(directory / p.name)
+            if not p.is_symlink()
+            and (
+                not (directory / p.name).exists()
+                or _md5(p) != _md5(directory / p.name)
+            )
         ]
         audio_changed = any(p.suffix == ".flac" for p in changed)
-        if audio_changed:
-            # Include unchanged tracks so the whole set sorts consistently.
-            changed_names = {p.name for p in changed}
-            changed.extend(
-                stage / track["destination"]
-                for track in plan["tracks"]
-                if track["destination"] not in changed_names
-            )
         removed = {
             t["source"]
             for t in plan["tracks"]
@@ -858,11 +862,18 @@ def apply_plan(directory, plan, *, workers=None, journal=None, compression=5):
         touched = {p.name for p in changed} | removed
         existing = _backup_and_check(directory, backup, touched, fingerprints)
         print("Committing prepared files...", flush=True)
+        stamps = {}
+        if audio_changed:
+            for track in plan["tracks"]:
+                path = directory / track["destination"]
+                if path.exists():
+                    stat = path.stat()
+                    stamps[path] = (stat.st_atime_ns, stat.st_mtime_ns)
         try:
-            if audio_changed:
-                _order_track_times(stage, plan["tracks"])
             for path in changed:
                 path.replace(directory / path.name)
+            if audio_changed:
+                _order_track_times(directory, plan["tracks"])
             for name in removed:
                 (directory / name).unlink()
         except BaseException:
@@ -871,6 +882,8 @@ def apply_plan(directory, plan, *, workers=None, journal=None, compression=5):
                     shutil.copy2(backup / name, directory / name)
                 else:
                     (directory / name).unlink(missing_ok=True)
+            for path, stamp in stamps.items():
+                os.utime(path, ns=stamp)
             raise
     return plan
 
