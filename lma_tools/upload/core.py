@@ -183,7 +183,18 @@ def validate_fingerprints(directory, flacs, allow_missing=False):
                 )
 
 
-def check_response(response):
+def check_response(response, *, metadata_noop=False):
+    if metadata_noop and response.status_code == 400:
+        try:
+            result = response.json()
+        except ValueError:
+            result = None
+        if (
+            isinstance(result, dict)
+            and result.get("success") is False
+            and result.get("error") == "no changes to _meta.xml"
+        ):
+            return
     response.raise_for_status()
     # Metadata/task endpoints can report application failures with HTTP 200.
     try:

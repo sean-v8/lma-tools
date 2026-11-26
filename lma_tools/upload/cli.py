@@ -1329,7 +1329,8 @@ def run_upload(args, directory, project, config):
                 queue_final_derive(session, identifier, journal)
         elif args.runtime:
             check_response(
-                item.modify_metadata({"runtime": runtime}, timeout=60)
+                item.modify_metadata({"runtime": runtime}, timeout=60),
+                metadata_noop=True,
             )
             journal.append("runtime_ok", runtime=runtime)
         else:
@@ -1360,7 +1361,8 @@ def run_upload(args, directory, project, config):
                 check_response(
                     item.modify_metadata(
                         transport_metadata(payload), **options
-                    )
+                    ),
+                    metadata_noop=True,
                 )
                 journal.append("metadata_ok", metadata=payload)
                 print(f"Metadata accepted; runtime {runtime}.", flush=True)
