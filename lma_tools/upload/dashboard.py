@@ -14,7 +14,7 @@ from uuid import uuid4
 from tqdm import tqdm
 
 from .progress import OrderedProgress, SharedColumns, TransferRate
-from .tasks import TaskMonitor
+from .tasks import TaskMonitor, saved_completion
 
 LIVE = {"checking", "uploading", "deriving"}
 
@@ -300,8 +300,23 @@ def read_jobs(directory, now=None):
                 for key in ("identifier", "status")
             ):
                 continue
-            if now - data["heartbeat"] > 86400:
+            data["_state_path"] = str(path)
+            if data["status"] in {
+                "verified",
+                "deriving",
+                "derive failed",
+            } and (completion := saved_completion(data)):
+                data["status"] = completion["status"]
+                data["heartbeat"] = max(
+                    data["heartbeat"], completion["finished"]
+                )
+                data["_task_complete"] = True
+            if (
+                data["status"] != "deriving"
+                and now - data["heartbeat"] > 86400
+            ):
                 path.unlink(missing_ok=True)
+                path.with_suffix(".done").unlink(missing_ok=True)
                 continue
             if data["status"] in ("checking", "uploading"):
                 if now - data["heartbeat"] > 10:
